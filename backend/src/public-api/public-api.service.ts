@@ -107,6 +107,43 @@ export class PublicApiService {
     this.redis.setex(`ip_bridge:${ip}`, 6 * 60 * 60, key).catch(() => {})
   }
 
+  // Recovery: try IP bridge → auto-device → device fingerprint → activityLog (web01.1 allowRecovery=true)
+  private async recoverKeyForIP(ip: string, fingerprint: string): Promise<string | null> {
+    if (ip) {
+      const mem = ipSessions.get(ip)
+      if (mem && mem.expiresAt > Date.now()) return mem.key
+      const redisKey = await this.redis.get(`ip_bridge:${ip}`).catch(() => null)
+      if (redisKey) return redisKey
+      const autoFp = this.autoFingerprint(ip)
+      const autoDev = await this.prisma.device.findFirst({
+        where: { fingerprint: autoFp },
+        include: { license: { select: { key: true, status: true, deletedAt: true } } },
+        orderBy: { lastSeenAt: 'desc' },
+      })
+      if (autoDev?.license && !autoDev.license.deletedAt && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(autoDev.license.status)) {
+        return autoDev.license.key
+      }
+    }
+    if (fingerprint) {
+      const dev = await this.prisma.device.findFirst({
+        where: { fingerprint },
+        include: { license: { select: { key: true, status: true, deletedAt: true } } },
+        orderBy: { lastSeenAt: 'desc' },
+      })
+      if (dev?.license && !dev.license.deletedAt && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(dev.license.status)) {
+        return dev.license.key
+      }
+    }
+    if (ip) {
+      const log = await this.prisma.activityLog.findFirst({
+        where: { ip, licenseKey: { not: '' }, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (log?.licenseKey) return log.licenseKey
+    }
+    return null
+  }
+
   // Identical to web01.1: 'auto_' + sha256(ip+'_cs_device').slice(0,12)
   private autoFingerprint(ip: string): string {
     return 'auto_' + crypto.createHash('sha256').update(ip + '_cs_device').digest('hex').substring(0, 12)
@@ -247,7 +284,8 @@ export class PublicApiService {
     ip: string
     ua: string
   }): Promise<VerifyResult> {
-    const { key, fingerprint, action, ip, ua } = params
+    const { fingerprint, action, ip, ua } = params
+    let key = params.key
     const pluginName = this.safeDecodePlugin(params.pluginName)
     const deviceModel = params.deviceModel || this.extractDeviceModel(ua) || 'Android Device'
 
@@ -267,10 +305,26 @@ export class PublicApiService {
     }
 
     // License lookup
-    const license = await this.prisma.license.findFirst({
+    let license = await this.prisma.license.findFirst({
       where: { key, deletedAt: null },
       include: { devices: true },
     })
+
+    // Recovery: if key not found/deleted, try IP bridge/device/log — matches web01.1 resolveLicenseForRequest(allowRecovery=true)
+    if (!license) {
+      const recoveredKey = await this.recoverKeyForIP(ip, fingerprint)
+      if (recoveredKey && recoveredKey !== key) {
+        const recoveredLic = await this.prisma.license.findFirst({
+          where: { key: recoveredKey, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
+          include: { devices: true },
+        })
+        if (recoveredLic) {
+          this.logger.log(`[VERIFY] key recovered via bridge: ${key} -> ${recoveredKey} ip=${ip}`)
+          key = recoveredKey
+          license = recoveredLic
+        }
+      }
+    }
 
     if (!license) {
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'LOW', licenseKey: key, ip, message: 'License not found' })
