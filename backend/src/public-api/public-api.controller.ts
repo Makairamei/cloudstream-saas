@@ -72,7 +72,8 @@ export class PublicApiController {
 
   @Post('api/verify_activity')
   @HttpCode(HttpStatus.OK)
-  async verifyActivity(@Body() body: any, @Req() req: Request) {
+  async verifyActivity(@Body() body: any, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
     const key = (body.key ?? '').trim()
     const deviceId = (body.device_id ?? '').trim()
     const deviceModel = (body.device_model ?? '').trim()
@@ -94,7 +95,8 @@ export class PublicApiController {
   // ── Legacy check-ip (GET variant used by older plugins) ──
 
   @Get('api/check-ip')
-  async checkIp(@Query() q: any, @Req() req: Request) {
+  async checkIp(@Query() q: any, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
     const key = (q.key ?? '').trim()
     const deviceId = (q.device_id ?? '').trim()
     const pluginName = (q.plugin ?? '').trim()
@@ -132,16 +134,15 @@ export class PublicApiController {
   // ── Auto-discover license from device/IP ─────────────────
 
   @Get('api/discover')
-  async discover(@Query() q: any, @Req() req: Request) {
+  async discover(@Query() q: any, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+
     const deviceId = (q.device_id ?? '').trim()
-    const ua = req.headers['user-agent'] ?? ''
 
     if (!deviceId || deviceId.toLowerCase() === 'unknown') {
       return { status: 'error', message: 'Device ID tidak valid.' }
     }
-
-    const isBrowserReq = /Windows NT|Macintosh/i.test(ua) && !/Android/i.test(ua)
-    if (isBrowserReq) return { status: 'error', message: 'Desktop access not allowed' }
 
     const result = await this.service.discoverLicense({ fingerprint: deviceId, ip: clientIp(req) })
     return result
