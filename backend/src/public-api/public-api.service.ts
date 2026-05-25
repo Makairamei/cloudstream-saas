@@ -702,7 +702,7 @@ export class PublicApiService {
       this.logger.log(`[REPO] IP bridge set: ${ip} -> ${key}`)
       this.upsertAutoDevice(license.id, ip).catch(() => {})
       this.prisma.activityLog.create({
-        data: { type: 'VERIFY_OK' as any, severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'repo.json accessed' },
+        data: { type: 'VERIFY_OK' as any, severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'Repository URL ditambahkan / CloudStream terhubung' },
       }).catch(() => {})
     }
 
@@ -728,9 +728,6 @@ export class PublicApiService {
       this.setIPBridge(ip, key)
       this.logger.log(`[PLUGINS] IP bridge refreshed: ${ip} -> ${key}`)
       this.upsertAutoDevice(license.id, ip).catch(() => {})
-      this.prisma.activityLog.create({
-        data: { type: 'VERIFY_OK' as any, severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'plugins.json accessed' },
-      }).catch(() => {})
     }
 
     const where: any = { isEnabled: true }
@@ -760,6 +757,25 @@ export class PublicApiService {
         fileSize: p.size ?? 0,
       }
     })
+
+    // Log per-plugin OPEN activity — like web01.1 trackPluginUsage(key, autoDeviceId, p.internalName, 'OPEN', ip)
+    if (ip) {
+      setImmediate(async () => {
+        const pluginNames = pluginList.map(p => p.name).join(', ')
+        await this.prisma.activityLog.create({
+          data: {
+            type: 'VERIFY_OK' as any, severity: 'LOW',
+            licenseId: license.id, licenseKey: key, ip,
+            message: `Plugin list loaded (${pluginList.length}): ${pluginNames.substring(0, 200)}`,
+          },
+        }).catch(() => {})
+        for (const p of pluginList) {
+          await this.prisma.pluginUsageLog.create({
+            data: { pluginId: await this.resolvePluginId(p.internalName), licenseKey: key, action: 'OPEN', ip },
+          }).catch(() => {})
+        }
+      })
+    }
 
     return { ok: true, plugins: pluginList }
   }
