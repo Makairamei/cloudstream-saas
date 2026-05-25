@@ -6,7 +6,7 @@
 
 set -e
 APP_DIR="/root/cloudstream"
-REPO_URL="__REPLACE_WITH_GITHUB_URL__"   # e.g. https://github.com/youruser/cloudstream-saas.git
+REPO_URL="https://github.com/Makairamei/cloudstream-saas.git"
 
 echo "=== CloudStream SaaS VPS Deploy ==="
 
