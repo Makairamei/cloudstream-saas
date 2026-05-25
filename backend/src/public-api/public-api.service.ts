@@ -387,13 +387,22 @@ export class PublicApiService {
       if (!fingerprint.startsWith('auto_') && ip) {
         const autoFp = this.autoFingerprint(ip)
         const autoHash = this.deviceHash(autoFp, license.id)
-        const autoDevice = license.devices.find(d => d.hash === autoHash)
+        let autoDevice = license.devices.find(d => d.hash === autoHash)
+        // Last resort: single auto_ on this license = must be same device (web01.1)
+        if (!autoDevice) {
+          const allAuto = license.devices.filter(d => d.fingerprint.startsWith('auto_') && d.status !== 'BLOCKED')
+          if (allAuto.length === 1) autoDevice = allAuto[0]
+        }
         if (autoDevice && autoDevice.status !== 'BLOCKED') {
           deviceRecord = await this.prisma.device.update({
             where: { id: autoDevice.id },
             data: { fingerprint, hash, name: deviceModel, model: deviceModel, lastIp: ip, lastSeenAt: new Date() },
           })
-          isNewDevice = true
+          isNewDevice = false // web01.1: upgrade is NOT a new device — action must still be logged
+          // Delete all remaining auto_ for this license (upgraded device now has real fingerprint)
+          setImmediate(() => this.prisma.device.deleteMany({
+            where: { licenseId: license.id, fingerprint: { startsWith: 'auto_' } },
+          }).catch(() => {}))
         }
       }
       if (!deviceRecord) {
@@ -421,12 +430,18 @@ export class PublicApiService {
         metadata: { plugin: pluginName, action },
       })
     } else {
-      // Update existing device last seen
-      await this.prisma.device.update({
-        where: { id: existingDevice.id },
-        data: { status: 'ONLINE', lastIp: ip, lastSeenAt: new Date() },
-      })
+      // Update existing device last seen + model (if better name available)
+      const updateData: any = { status: 'ONLINE', lastIp: ip, lastSeenAt: new Date() }
+      const isGenericModel = !existingDevice.name || existingDevice.name === 'Android Device' || existingDevice.name.startsWith('Auto')
+      if (isGenericModel && deviceModel && deviceModel !== 'Android Device') updateData.name = deviceModel
+      await this.prisma.device.update({ where: { id: existingDevice.id }, data: updateData })
       deviceRecord = existingDevice
+      // Clean up any leftover auto_ devices for this license
+      if (!fingerprint.startsWith('auto_')) {
+        setImmediate(() => this.prisma.device.deleteMany({
+          where: { licenseId: license.id, fingerprint: { startsWith: 'auto_' } },
+        }).catch(() => {}))
+      }
     }
 
     // Track plugin IP history
@@ -456,16 +471,13 @@ export class PublicApiService {
       }
     }
 
-    // Log success
-    const actType = isNewDevice ? 'DEVICE_REGISTERED' : this.actionToActivityType(action)
-    if (!isNewDevice) {
-      await this.logActivity({
-        type: actType, severity: 'LOW',
-        licenseId: license.id, deviceId: deviceRecord?.id, licenseKey: key, ip,
-        message: this.buildSuccessMessage(action, pluginName, params.data),
-        metadata: { plugin: pluginName, action },
-      })
-    }
+    // Log action — always, even on first registration (web01.1 logs access + plugin usage separately)
+    await this.logActivity({
+      type: this.actionToActivityType(action), severity: 'LOW',
+      licenseId: license.id, deviceId: deviceRecord?.id, licenseKey: key, ip,
+      message: this.buildSuccessMessage(action, pluginName, params.data),
+      metadata: { plugin: pluginName, action },
+    })
 
     // Update license counters
     await this.prisma.license.update({
