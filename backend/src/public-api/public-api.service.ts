@@ -481,6 +481,11 @@ export class PublicApiService {
       this.setIPBridge(ip, key)
     }
 
+    // Upgrade auto_ placeholders across ALL licenses for this IP (web01.1 upgradeAutoDevicesForIP)
+    if (!fingerprint.startsWith('auto_') && ip && deviceModel && deviceModel !== 'Android Device') {
+      setImmediate(() => this.upgradeAutoDevicesForIP(ip, fingerprint, deviceModel))
+    }
+
     return {
       ok: true,
       daysLeft: this.calcDaysLeft(license.expiresAt),
@@ -761,12 +766,19 @@ export class PublicApiService {
     }
   }
 
+  // Default selector config — used when plugin has no custom config in DB (web01.1 equivalent)
+  private readonly DEFAULT_SELECTORS = {
+    server_selector: '.mobius option',
+    value_attr: 'value',
+    encoding: 'base64',
+  }
+
   async getSelectors(pluginName: string): Promise<{ ok: boolean; selectors?: any; message?: string }> {
     const plugin = await this.prisma.plugin.findFirst({ where: { slug: pluginName } })
-    if (!plugin?.metadata) return { ok: false, message: 'Selector config not found' }
+    if (!plugin?.metadata) return { ok: true, selectors: this.DEFAULT_SELECTORS }
 
     const meta = plugin.metadata as any
-    if (!meta.selectors) return { ok: false, message: 'No selectors configured for this plugin' }
+    if (!meta.selectors) return { ok: true, selectors: this.DEFAULT_SELECTORS }
 
     const { secret_key_default, secret_key_alt, ...safeSelectors } = meta.selectors
     return { ok: true, selectors: safeSelectors }
@@ -824,10 +836,50 @@ export class PublicApiService {
 
   private buildSuccessMessage(action: string, pluginName: string, data: string): string {
     const act = action?.toUpperCase() ?? ''
-    if (act === 'PLAY' && data) return `Playback started via ${pluginName}`
-    if (act === 'SELECTORS') return `Selector config loaded successfully`
-    if (pluginName) return `Plugin session — ${pluginName}`
-    return 'License verified successfully'
+    const pn = pluginName || 'unknown'
+    if (act === 'PLAY' && data) return `Playing: ${data.substring(0, 80)} — ${pn}`
+    if (act === 'PLAY') return `Playback started — ${pn}`
+    if (act === 'HOME') return `Home loaded — ${pn}`
+    if (act === 'OPEN') return `Plugin opened — ${pn}`
+    if (act === 'SEARCH') return `Search — ${pn}`
+    if (act === 'DETAIL') return `Detail page — ${pn}`
+    if (act === 'SELECTORS') return `Selector config loaded — ${pn}`
+    if (act === 'SESSION') return `Session issued — ${pn}`
+    return `${act} — ${pn}`
+  }
+
+  // Upgrade all auto_ placeholder devices for this IP to real device — matches web01.1 upgradeAutoDevicesForIP
+  private async upgradeAutoDevicesForIP(ip: string, realFingerprint: string, deviceModel: string): Promise<void> {
+    try {
+      const autoFp = this.autoFingerprint(ip)
+      const autoDevices = await this.prisma.device.findMany({
+        where: { fingerprint: autoFp },
+        include: { license: { select: { id: true, deletedAt: true, maxDevices: true } } },
+      })
+      for (const autoDev of autoDevices) {
+        try {
+          const lic = autoDev.license
+          if (!lic || lic.deletedAt) continue
+          const newHash = this.deviceHash(realFingerprint, lic.id)
+          const existing = await this.prisma.device.findFirst({ where: { hash: newHash } })
+          if (existing) {
+            await this.prisma.device.delete({ where: { id: autoDev.id } }).catch(() => {})
+            continue
+          }
+          if (lic.maxDevices > 0) {
+            const realCount = await this.prisma.device.count({
+              where: { licenseId: lic.id, NOT: { fingerprint: { startsWith: 'auto_' } } },
+            })
+            if (realCount >= lic.maxDevices) continue
+          }
+          await this.prisma.device.update({
+            where: { id: autoDev.id },
+            data: { fingerprint: realFingerprint, hash: newHash, name: deviceModel, model: deviceModel, lastSeenAt: new Date() },
+          }).catch(() => {})
+          this.logger.log(`[UPGRADE] auto_ -> ${realFingerprint} model=${deviceModel} license=${lic.id}`)
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   private extractAppVersion(ua: string): string | undefined {
