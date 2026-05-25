@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build
+frontend/.next/
+frontend/out/
+
+# Prisma generated
+backend/generated/
+
+# Env files (never commit!)
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Uploads
+uploads/
+*.apk
+*.cs3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes (local)
+postgres_data/
+redis_data/
+
+# Test
+coverage/
+
+# Deploy script with credentials
+deploy.ps1

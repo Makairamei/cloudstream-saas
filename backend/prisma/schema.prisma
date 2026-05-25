@@ -1,0 +1,416 @@
+// CloudStream SaaS — Prisma Schema
+// ─────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ──────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MODERATOR
+  RESELLER
+  ANALYST
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUSPENDED
+  TRIAL
+  EXPIRING_SOON
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  BLOCKED
+  SUSPICIOUS
+}
+
+enum ActivityType {
+  VERIFY_OK
+  VERIFY_FAIL
+  DEVICE_REGISTERED
+  PLUGIN_SESSION
+  SELECTORS_OK
+  PLAYBACK_START
+  PLAYBACK_STOP
+  ABUSE_DETECTED
+  LICENSE_CREATED
+  LICENSE_REVOKED
+  LICENSE_EXPIRED
+  DEVICE_BLOCKED
+  DEVICE_UNBLOCKED
+  IP_BLOCKED
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AbuseType {
+  DEVICE_OVERFLOW
+  IP_ROTATION
+  BURST_REQUEST
+  MULTI_IP_LICENSE
+  DEVICE_SPOOF
+  VPN_DETECTED
+  TOKEN_ABUSE
+}
+
+enum AdminAction {
+  LOGIN
+  LOGOUT
+  CREATE_LICENSE
+  UPDATE_LICENSE
+  DELETE_LICENSE
+  REVOKE_LICENSE
+  RESTORE_LICENSE
+  BLOCK_IP
+  UNBLOCK_IP
+  BLOCK_DEVICE
+  UNBLOCK_DEVICE
+  CREATE_PLUGIN
+  UPDATE_PLUGIN
+  DELETE_PLUGIN
+  UPDATE_SETTINGS
+  CREATE_ADMIN
+  DELETE_ADMIN
+  UPDATE_ROLE
+}
+
+// ── Models ─────────────────────────────────────────────────
+
+model Admin {
+  id                String       @id @default(cuid())
+  email             String       @unique
+  name              String
+  password          String
+  role              Role         @default(ADMIN)
+  avatar            String?
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean      @default(false)
+  isActive          Boolean      @default(true)
+  lastLogin         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  sessions          AdminSession[]
+  auditLogs         AdminLog[]
+
+  @@map("admins")
+}
+
+model AdminSession {
+  id          String   @id @default(cuid())
+  adminId     String
+  admin       Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  refreshToken String  @unique
+  ip          String?
+  userAgent   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([adminId])
+  @@map("admin_sessions")
+}
+
+model AdminLog {
+  id          String      @id @default(cuid())
+  adminId     String
+  admin       Admin       @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  action      AdminAction
+  target      String?
+  targetType  String?
+  details     Json?
+  diff        Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime    @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_logs")
+}
+
+model License {
+  id                String        @id @default(cuid())
+  key               String        @unique
+  name              String
+  email             String?
+  status            LicenseStatus @default(ACTIVE)
+  maxDevices        Int           @default(3)
+  gracePeriodDays   Int           @default(7)
+  isTrial           Boolean       @default(false)
+  expiresAt         DateTime?
+  revokedAt         DateTime?
+  revokedReason     String?
+  notes             String?
+  tags              String[]      @default([])
+  allowedPlugins    String[]      @default([])
+  resellerId        String?
+  playbackCount     Int           @default(0)
+  verifyCount       Int           @default(0)
+  trustScore        Float         @default(100)
+  deletedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  lastVerifiedAt    DateTime?
+
+  devices           Device[]
+  activityLogs      ActivityLog[]
+  playbackLogs      PlaybackLog[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@index([email])
+  @@index([resellerId])
+  @@map("licenses")
+}
+
+model Device {
+  id              String       @id @default(cuid())
+  licenseId       String
+  license         License      @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  fingerprint     String
+  hash            String       @unique
+  name            String?
+  model           String?
+  os              String?
+  osVersion       String?
+  appVersion      String?
+  status          DeviceStatus @default(OFFLINE)
+  trustScore      Float        @default(100)
+  lastIp          String?
+  lastSeenAt      DateTime?
+  blockedAt       DateTime?
+  blockedReason   String?
+  isVpn           Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  ipHistory       DeviceIp[]
+  activityLogs    ActivityLog[]
+  playbackLogs    PlaybackLog[]
+
+  @@index([licenseId])
+  @@index([status])
+  @@index([fingerprint])
+  @@map("devices")
+}
+
+model DeviceIp {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ip        String
+  country   String?
+  city      String?
+  isVpn     Boolean  @default(false)
+  seenAt    DateTime @default(now())
+
+  @@index([deviceId])
+  @@map("device_ips")
+}
+
+model Plugin {
+  id            String       @id @default(cuid())
+  slug          String       @unique
+  name          String
+  description   String?
+  version       String
+  category      String?
+  fileUrl       String?
+  checksum      String?
+  size          Int?
+  isEnabled     Boolean      @default(true)
+  isFeatured    Boolean      @default(false)
+  downloadCount Int          @default(0)
+  iconUrl       String?
+  metadata      Json?
+  changelog     Json[]       @default([])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  versions      PluginVersion[]
+  usageLogs     PluginUsageLog[]
+
+  @@map("plugins")
+}
+
+model PluginVersion {
+  id          String   @id @default(cuid())
+  pluginId    String
+  plugin      Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  version     String
+  fileUrl     String?
+  checksum    String?
+  changelog   String?
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([pluginId])
+  @@map("plugin_versions")
+}
+
+model PluginUsageLog {
+  id          String   @id @default(cuid())
+  pluginId    String
+  plugin      Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  licenseKey  String
+  action      String
+  ip          String?
+  country     String?
+  createdAt   DateTime @default(now())
+
+  @@index([pluginId])
+  @@index([licenseKey])
+  @@index([createdAt])
+  @@map("plugin_usage_logs")
+}
+
+model ActivityLog {
+  id          String       @id @default(cuid())
+  type        ActivityType
+  severity    Severity     @default(LOW)
+  licenseId   String?
+  license     License?     @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+  deviceId    String?
+  device      Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  licenseKey  String
+  ip          String?
+  country     String?
+  message     String
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  @@index([type])
+  @@index([licenseId])
+  @@index([deviceId])
+  @@index([createdAt])
+  @@index([severity])
+  @@map("activity_logs")
+}
+
+model PlaybackLog {
+  id          String   @id @default(cuid())
+  licenseId   String?
+  license     License? @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+  deviceId    String?
+  device      Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  licenseKey  String
+  pluginSlug  String
+  videoTitle  String?
+  videoUrl    String?
+  duration    Int?
+  ip          String?
+  country     String?
+  createdAt   DateTime @default(now())
+
+  @@index([licenseId])
+  @@index([pluginSlug])
+  @@index([createdAt])
+  @@map("playback_logs")
+}
+
+model SecurityEvent {
+  id          String     @id @default(cuid())
+  type        AbuseType
+  severity    Severity
+  licenseKey  String?
+  deviceId    String?
+  ip          String?
+  country     String?
+  message     String
+  metadata    Json?
+  resolved    Boolean    @default(false)
+  resolvedAt  DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([type])
+  @@index([resolved])
+  @@index([createdAt])
+  @@map("security_events")
+}
+
+model BlockedIp {
+  id        String   @id @default(cuid())
+  ip        String   @unique
+  reason    String?
+  country   String?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@map("blocked_ips")
+}
+
+model BlockedDevice {
+  id        String   @id @default(cuid())
+  hash      String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@map("blocked_devices")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String
+  severity  Severity @default(LOW)
+  isRead    Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  events    String[]
+  secret    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("webhooks")
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  key         String    @unique
+  permissions String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@map("api_keys")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
