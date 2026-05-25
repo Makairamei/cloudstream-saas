@@ -44,5 +44,10 @@ redis_data/
 # Test
 coverage/
 
-# Deploy script with credentials
+# Deploy/maintenance scripts with credentials (never commit!)
 deploy.ps1
+sync_plugins.py
+security_audit.py
+ssh_check.py
+read_db.py
+*.py
