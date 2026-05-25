@@ -836,7 +836,9 @@ export class PublicApiService {
   // ──────────────────────────────────────────────────────────
 
   async resolvePluginFileUrl(slug: string, filename: string): Promise<string> {
-    const plugin = await this.prisma.plugin.findFirst({ where: { slug } })
+    const plugin = await this.prisma.plugin.findFirst({
+      where: { slug: { equals: slug, mode: 'insensitive' } },
+    })
     if (plugin?.fileUrl) return plugin.fileUrl
     return `https://raw.githubusercontent.com/Makairamei/CSNEW/master/builds/${filename}`
   }
