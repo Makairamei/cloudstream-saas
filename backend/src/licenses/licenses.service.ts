@@ -10,7 +10,8 @@ export class LicensesService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(dto: ListLicensesDto) {
-    const where: any = { deletedAt: null }
+    const includeDeleted = (dto as any).includeDeleted === true || (dto as any).includeDeleted === 'true'
+    const where: any = includeDeleted ? {} : { deletedAt: null }
     if (dto.status) where.status = dto.status
     if (dto.search) {
       where.OR = [
@@ -118,11 +119,15 @@ export class LicensesService {
   }
 
   async restore(id: string, adminId: string) {
-    const license = await this.findOne(id)
+    // Find regardless of deletedAt — restore must work even for soft-deleted licenses
+    const license = await this.prisma.license.findFirst({
+      where: { OR: [{ id }, { key: id }] },
+    })
+    if (!license) throw new NotFoundException('License not found')
 
     const updated = await this.prisma.license.update({
       where: { id: license.id },
-      data: { status: 'ACTIVE', revokedAt: null, revokedReason: null },
+      data: { status: 'ACTIVE', revokedAt: null, revokedReason: null, deletedAt: null },
     })
 
     await this.prisma.adminLog.create({
@@ -188,7 +193,7 @@ export class LicensesService {
 
     await this.prisma.license.update({
       where: { id: license.id },
-      data: { deletedAt: new Date() },
+      data: { deletedAt: new Date(), status: 'REVOKED' },
     })
 
     await this.prisma.adminLog.create({
