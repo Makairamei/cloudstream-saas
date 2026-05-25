@@ -730,17 +730,18 @@ export class PublicApiService {
 
     const where: any = { isEnabled: true }
     if (license.allowedPlugins?.length > 0) {
-      where.slug = { in: license.allowedPlugins }
+      where.slug = { in: license.allowedPlugins.map((s: string) => s.toLowerCase()) }
     }
 
     const plugins = await this.prisma.plugin.findMany({ where, orderBy: { name: 'asc' } })
 
     const pluginList: PluginEntry[] = plugins.map(p => {
-      let url = p.fileUrl || `${serverUrl}/r/${key}/${p.slug}.cs3`
       const meta = (p.metadata ?? {}) as any
+      const internalName = (meta.internalName as string | undefined) ?? p.name
+      let url = p.fileUrl || `${serverUrl}/r/${key}/${internalName}.cs3`
 
       return {
-        internalName: p.slug,
+        internalName,
         name: p.name,
         description: p.description ?? '',
         authors: meta.authors ?? [],
