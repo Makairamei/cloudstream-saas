@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 
 @Injectable()
@@ -45,5 +45,30 @@ export class DevicesService {
       where: { id: device.id },
       data: { status: 'OFFLINE', blockedAt: null, blockedReason: null },
     })
+  }
+
+  async remove(id: string) {
+    const device = await this.findOne(id)
+    await this.prisma.deviceIp.deleteMany({ where: { deviceId: device.id } })
+    await this.prisma.activityLog.updateMany({ where: { deviceId: device.id }, data: { deviceId: null } })
+    await this.prisma.playbackLog.updateMany({ where: { deviceId: device.id }, data: { deviceId: null } })
+    await this.prisma.device.delete({ where: { id: device.id } })
+  }
+
+  async bulk(action: string, ids: string[], adminId: string) {
+    const valid = ['block', 'unblock', 'delete']
+    if (!valid.includes(action)) throw new BadRequestException('Invalid bulk action')
+    if (!ids?.length) throw new BadRequestException('ids required')
+
+    let processed = 0
+    for (const id of ids.slice(0, 500)) {
+      try {
+        if (action === 'block') await this.block(id, 'Bulk block', adminId)
+        else if (action === 'unblock') await this.unblock(id, adminId)
+        else if (action === 'delete') await this.remove(id)
+        processed++
+      } catch { /* skip */ }
+    }
+    return { processed, action }
   }
 }

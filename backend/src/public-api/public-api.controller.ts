@@ -278,17 +278,18 @@ export class PublicApiController {
     if (isBot(ua)) return res.status(403).send('Forbidden')
 
     // Validate license
-    const deviceId = (req.query.device_id as string ?? '').trim()
     const serverUrl = `${req.protocol}://${req.get('host')}`
     const manifest = await this.service.getRepoManifest(key, serverUrl)
     if (!manifest.ok) return res.status(403).send(manifest.message)
 
-    // Proxy the .cs3 file from GitHub
-    const githubUrl = `https://raw.githubusercontent.com/Makairamei/CSNEW/master/builds/${safeFilename}`
-    this.logger.log(`Proxying plugin: ${safeFilename} for key ${key}`)
+    // Resolve download URL: use fileUrl from DB if available, fallback to GitHub
+    const slug = safeFilename.replace(/\.cs3$/i, '')
+    const pluginFileUrl = await this.service.resolvePluginFileUrl(slug, safeFilename)
 
-    const client = githubUrl.startsWith('https') ? https : http
-    const request = client.get(githubUrl, { headers: { 'User-Agent': 'CloudStreamSaaS/2.0' } }, (response) => {
+    this.logger.log(`Serving plugin: ${safeFilename} for key ${key} -> ${pluginFileUrl}`)
+
+    const client = pluginFileUrl.startsWith('https') ? https : http
+    const request = client.get(pluginFileUrl, { headers: { 'User-Agent': 'CloudStreamSaaS/2.0' } }, (response) => {
       if (response.statusCode !== 200) {
         return res.status(404).send('Plugin not found')
       }

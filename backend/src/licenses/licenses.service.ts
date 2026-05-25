@@ -132,6 +132,57 @@ export class LicensesService {
     return updated
   }
 
+  async activate(id: string, adminId: string) {
+    const license = await this.findOne(id)
+
+    const updated = await this.prisma.license.update({
+      where: { id: license.id },
+      data: { status: 'ACTIVE', revokedAt: null, revokedReason: null },
+    })
+
+    await this.prisma.adminLog.create({
+      data: { adminId, action: 'UPDATE_LICENSE', target: license.key, targetType: 'LICENSE', details: { action: 'activate' } },
+    })
+
+    return updated
+  }
+
+  async renew(id: string, days: number, adminId: string) {
+    const license = await this.findOne(id)
+    const base = license.expiresAt && license.expiresAt > new Date() ? license.expiresAt : new Date()
+    const newExpiry = new Date(base.getTime() + days * 86_400_000)
+
+    const updated = await this.prisma.license.update({
+      where: { id: license.id },
+      data: { expiresAt: newExpiry, status: 'ACTIVE', revokedAt: null, revokedReason: null },
+    })
+
+    await this.prisma.adminLog.create({
+      data: { adminId, action: 'UPDATE_LICENSE', target: license.key, targetType: 'LICENSE', details: { action: 'renew', days } },
+    })
+
+    return updated
+  }
+
+  async bulk(action: string, ids: string[], adminId: string) {
+    const validActions = ['revoke', 'activate', 'delete', 'restore']
+    if (!validActions.includes(action)) throw new BadRequestException('Invalid bulk action')
+    if (!ids?.length) throw new BadRequestException('ids required')
+
+    let processed = 0
+    for (const id of ids.slice(0, 200)) {
+      try {
+        if (action === 'revoke') await this.revoke(id, 'Bulk revoke', adminId)
+        else if (action === 'activate') await this.activate(id, adminId)
+        else if (action === 'delete') await this.remove(id, adminId)
+        else if (action === 'restore') await this.restore(id, adminId)
+        processed++
+      } catch { /* skip invalid ids */ }
+    }
+
+    return { processed, action }
+  }
+
   async remove(id: string, adminId: string) {
     const license = await this.findOne(id)
 

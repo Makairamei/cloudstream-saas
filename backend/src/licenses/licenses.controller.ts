@@ -47,6 +47,22 @@ export class LicensesController {
     return this.service.restore(id, admin.id)
   }
 
+  @Patch(':id/activate')
+  activate(@Param('id') id: string, @CurrentAdmin() admin: any) {
+    return this.service.activate(id, admin.id)
+  }
+
+  @Patch(':id/renew')
+  renew(@Param('id') id: string, @Body('days') days: number, @CurrentAdmin() admin: any) {
+    return this.service.renew(id, days || 30, admin.id)
+  }
+
+  @Post('bulk')
+  @HttpCode(HttpStatus.OK)
+  bulk(@Body('action') action: string, @Body('ids') ids: string[], @CurrentAdmin() admin: any) {
+    return this.service.bulk(action, ids, admin.id)
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string, @CurrentAdmin() admin: any) {
