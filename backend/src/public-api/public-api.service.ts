@@ -453,19 +453,17 @@ export class PublicApiService {
 
     // Track plugin usage
     if (pluginName && action) {
-      await this.prisma.pluginUsageLog.create({
-        data: {
-          pluginId: await this.resolvePluginId(pluginName),
-          licenseKey: key,
-          action,
-          ip,
-        },
-      }).catch(() => {})
+      const pluginId = await this.resolvePluginId(pluginName)
+      if (pluginId) {
+        await this.prisma.pluginUsageLog.create({
+          data: { pluginId, licenseKey: key, action, ip },
+        }).catch(() => {})
+      }
 
       // Increment plugin download/use count
       if (['PLAY', 'OPEN', 'HOME'].includes(action.toUpperCase())) {
         await this.prisma.plugin.updateMany({
-          where: { slug: pluginName },
+          where: { slug: { equals: pluginName, mode: 'insensitive' } },
           data: { downloadCount: { increment: 1 } },
         }).catch(() => {})
       }
@@ -770,9 +768,12 @@ export class PublicApiService {
           },
         }).catch(() => {})
         for (const p of pluginList) {
-          await this.prisma.pluginUsageLog.create({
-            data: { pluginId: await this.resolvePluginId(p.internalName), licenseKey: key, action: 'OPEN', ip },
-          }).catch(() => {})
+          const pid = await this.resolvePluginId(p.internalName)
+          if (pid) {
+            await this.prisma.pluginUsageLog.create({
+              data: { pluginId: pid, licenseKey: key, action: 'OPEN', ip },
+            }).catch(() => {})
+          }
         }
       })
     }
@@ -839,14 +840,12 @@ export class PublicApiService {
     return `https://raw.githubusercontent.com/Makairamei/CSNEW/master/builds/${filename}`
   }
 
-  private async resolvePluginId(slug: string): Promise<string> {
-    const plugin = await this.prisma.plugin.findFirst({ where: { slug } })
-    if (plugin) return plugin.id
-    // Auto-create unknown plugin record
-    const created = await this.prisma.plugin.create({
-      data: { slug, name: slug, version: '1', isEnabled: true },
-    }).catch(() => null)
-    return created?.id ?? slug
+  private async resolvePluginId(slug: string): Promise<string | null> {
+    if (!slug) return null
+    const plugin = await this.prisma.plugin.findFirst({
+      where: { slug: { equals: slug, mode: 'insensitive' } },
+    })
+    return plugin?.id ?? null
   }
 
   private actionToActivityType(action: string): string {
