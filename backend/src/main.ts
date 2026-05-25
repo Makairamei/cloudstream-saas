@@ -12,6 +12,9 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
   })
 
+  // Trust Nginx reverse proxy — makes req.protocol return 'https' correctly
+  app.set('trust proxy', 1)
+
   // Security
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
   app.use(compression())
@@ -21,7 +24,7 @@ async function bootstrap() {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'x-plugin-session'],
   })
 
   // Global pipes

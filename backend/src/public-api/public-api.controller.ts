@@ -20,6 +20,13 @@ function isBot(ua: string): boolean {
   return /TelegramBot|Googlebot|Bingbot|YandexBot|Slackbot|WhatsApp|Discordbot|LinkedInBot|Applebot|Bytespider/i.test(ua)
 }
 
+function getServerUrl(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim()
+    || (process.env.SERVER_URL ? '' : req.protocol)
+  if (process.env.SERVER_URL) return process.env.SERVER_URL.replace(/\/$/, '')
+  return `${proto}://${req.get('host')}`
+}
+
 // ─────────────────────────────────────────────────────────────
 // All routes below are excluded from the global api/v1 prefix
 // ─────────────────────────────────────────────────────────────
@@ -37,11 +44,6 @@ export class PublicApiController {
     return { status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() }
   }
 
-  @Get('api/config')
-  config(@Req() req: Request) {
-    const serverUrl = `${req.protocol}://${req.get('host')}`
-    return { server_url: serverUrl, version: '2.0.0' }
-  }
 
   // ── License validate (initial activation) ───────────────
 
@@ -214,8 +216,8 @@ export class PublicApiController {
 
   @Get('r/:key/repo.json')
   async repoJson(@Param('key') key: string, @Req() req: Request, @Res() res: Response) {
-    const serverUrl = `${req.protocol}://${req.get('host')}`
-    const result = await this.service.getRepoManifest(key, serverUrl)
+    const serverUrl = getServerUrl(req)
+    const result = await this.service.getRepoManifest(key, serverUrl, clientIp(req))
     if (!result.ok) return res.status(403).json({ status: 'error', message: result.message })
     return res.json(result.data)
   }
@@ -245,8 +247,8 @@ export class PublicApiController {
 
   @Get('r/:key/plugins.json')
   async pluginsJson(@Param('key') key: string, @Req() req: Request, @Res() res: Response) {
-    const serverUrl = `${req.protocol}://${req.get('host')}`
-    const result = await this.service.getPluginsList(key, serverUrl)
+    const serverUrl = getServerUrl(req)
+    const result = await this.service.getPluginsList(key, serverUrl, clientIp(req))
     if (!result.ok) return res.status(403).json({ status: 'error', message: result.message })
     return res.json(result.plugins)
   }

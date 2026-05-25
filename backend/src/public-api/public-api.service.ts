@@ -52,6 +52,15 @@ const ERR_MESSAGES: Record<string, string> = {
   INVALID_DEVICE:    'Device ID tidak valid.',
 }
 
+// In-memory IP session bridge — same as reference server's ipSessions Map.
+// Maps ip → { key, expiresAt } for 6 hours after repo.json is loaded.
+// Lets /api/discover return the license key to the plugin on first run.
+const ipSessions = new Map<string, { key: string; expiresAt: number }>()
+setInterval(() => {
+  const now = Date.now()
+  for (const [ip, s] of ipSessions.entries()) if (s.expiresAt < now) ipSessions.delete(ip)
+}, 5 * 60_000)
+
 @Injectable()
 export class PublicApiService {
   private readonly logger = new Logger(PublicApiService.name)
@@ -90,6 +99,33 @@ export class PublicApiService {
       if (model && !['android', 'u'].includes(model.toLowerCase())) return model.substring(0, 100)
     }
     return 'Android Device'
+  }
+
+  private setIPBridge(ip: string, key: string) {
+    if (!ip || !key) return
+    ipSessions.set(ip, { key, expiresAt: Date.now() + 6 * 60 * 60 * 1000 })
+    this.redis.setex(`ip_bridge:${ip}`, 6 * 60 * 60, key).catch(() => {})
+  }
+
+  // Identical to web01.1: 'auto_' + sha256(ip+'_cs_device').slice(0,12)
+  private autoFingerprint(ip: string): string {
+    return 'auto_' + crypto.createHash('sha256').update(ip + '_cs_device').digest('hex').substring(0, 12)
+  }
+
+  // Register / refresh auto-IP device (web01.1 equivalent of validateLicense with autoDeviceId)
+  private async upsertAutoDevice(licenseId: string, ip: string): Promise<void> {
+    if (!ip) return
+    const fingerprint = this.autoFingerprint(ip)
+    const hash = this.deviceHash(fingerprint, licenseId)
+    await this.prisma.device.upsert({
+      where: { hash },
+      create: {
+        licenseId, fingerprint, hash,
+        name: 'Auto IP Device', model: 'Auto IP Device',
+        status: 'ONLINE', lastIp: ip, lastSeenAt: new Date(),
+      },
+      update: { lastIp: ip, lastSeenAt: new Date(), status: 'ONLINE' },
+    }).catch(() => {})
   }
 
   private calcDaysLeft(expiresAt: Date | null): number {
@@ -227,7 +263,7 @@ export class PublicApiService {
     // IP block check
     if (await this.isIpBlocked(ip)) {
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'HIGH', licenseKey: key, ip, message: 'IP is blocked' })
-      return { ok: false, reason: 'IP_BLOCKED', message: ERR_MESSAGES.IP_BLOCKED }
+      return { ok: false, reason: 'ip_blocked', message: ERR_MESSAGES.IP_BLOCKED }
     }
 
     // License lookup
@@ -238,17 +274,17 @@ export class PublicApiService {
 
     if (!license) {
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'LOW', licenseKey: key, ip, message: 'License not found' })
-      return { ok: false, reason: 'LICENSE_NOT_FOUND', message: ERR_MESSAGES.LICENSE_NOT_FOUND }
+      return { ok: false, reason: 'not_found', message: ERR_MESSAGES.LICENSE_NOT_FOUND }
     }
 
     // Status checks
     if (license.status === 'REVOKED') {
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'MEDIUM', licenseId: license.id, licenseKey: key, ip, message: 'License revoked' })
-      return { ok: false, reason: 'REVOKED', message: ERR_MESSAGES.REVOKED }
+      return { ok: false, reason: 'revoked', message: ERR_MESSAGES.REVOKED }
     }
 
     if (license.status === 'SUSPENDED') {
-      return { ok: false, reason: 'SUSPENDED', message: ERR_MESSAGES.SUSPENDED }
+      return { ok: false, reason: 'suspended', message: ERR_MESSAGES.SUSPENDED }
     }
 
     // Expiry check — auto-expire in DB
@@ -257,7 +293,7 @@ export class PublicApiService {
         await this.prisma.license.update({ where: { id: license.id }, data: { status: 'EXPIRED' } })
       }
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'License expired' })
-      return { ok: false, reason: 'EXPIRED', message: ERR_MESSAGES.EXPIRED }
+      return { ok: false, reason: 'expired', message: ERR_MESSAGES.EXPIRED }
     }
 
     // Device management
@@ -265,16 +301,17 @@ export class PublicApiService {
 
     if (await this.isDeviceBlocked(hash)) {
       await this.logActivity({ type: 'VERIFY_FAIL', severity: 'HIGH', licenseId: license.id, licenseKey: key, ip, message: 'Device is blocked' })
-      return { ok: false, reason: 'DEVICE_BLOCKED', message: ERR_MESSAGES.DEVICE_BLOCKED }
+      return { ok: false, reason: 'device_blocked', message: ERR_MESSAGES.DEVICE_BLOCKED }
     }
 
     const existingDevice = license.devices.find(d => d.hash === hash)
-    const activeDevices = license.devices.filter(d => d.status !== 'BLOCKED')
+    // Exclude auto_ placeholders from real-device count (same as web01.1)
+    const activeDevices = license.devices.filter(d => d.status !== 'BLOCKED' && !d.fingerprint.startsWith('auto_'))
     let deviceRecord = existingDevice
     let isNewDevice = false
 
     if (!existingDevice) {
-      if (activeDevices.length >= license.maxDevices) {
+      if (license.maxDevices > 0 && activeDevices.length >= license.maxDevices) {
         await this.logActivity({
           type: 'ABUSE_DETECTED', severity: 'HIGH',
           licenseId: license.id, licenseKey: key, ip,
@@ -289,24 +326,39 @@ export class PublicApiService {
           },
         })
         this.gateway.emitSecurityAlert({ type: 'DEVICE_OVERFLOW', licenseKey: key, ip })
-        return { ok: false, reason: 'DEVICE_LIMIT', message: ERR_MESSAGES.DEVICE_LIMIT }
+        return { ok: false, reason: 'max_devices', message: ERR_MESSAGES.DEVICE_LIMIT }
       }
 
-      // Register new device
-      deviceRecord = await this.prisma.device.create({
-        data: {
-          licenseId: license.id,
-          fingerprint,
-          hash,
-          name: deviceModel,
-          model: deviceModel,
-          status: 'ONLINE',
-          lastIp: ip,
-          lastSeenAt: new Date(),
-          appVersion: this.extractAppVersion(params.ua),
-        },
-      })
-      isNewDevice = true
+      // Upgrade matching auto_ placeholder instead of using a new slot (web01.1 behaviour)
+      if (!fingerprint.startsWith('auto_') && ip) {
+        const autoFp = this.autoFingerprint(ip)
+        const autoHash = this.deviceHash(autoFp, license.id)
+        const autoDevice = license.devices.find(d => d.hash === autoHash)
+        if (autoDevice && autoDevice.status !== 'BLOCKED') {
+          deviceRecord = await this.prisma.device.update({
+            where: { id: autoDevice.id },
+            data: { fingerprint, hash, name: deviceModel, model: deviceModel, lastIp: ip, lastSeenAt: new Date() },
+          })
+          isNewDevice = true
+        }
+      }
+      if (!deviceRecord) {
+        // Register new device
+        deviceRecord = await this.prisma.device.create({
+          data: {
+            licenseId: license.id,
+            fingerprint,
+            hash,
+            name: deviceModel,
+            model: deviceModel,
+            status: 'ONLINE',
+            lastIp: ip,
+            lastSeenAt: new Date(),
+            appVersion: this.extractAppVersion(params.ua),
+          },
+        })
+        isNewDevice = true
+      }
 
       await this.logActivity({
         type: 'DEVICE_REGISTERED', severity: 'LOW',
@@ -369,6 +421,11 @@ export class PublicApiService {
 
     // Async abuse checks
     setImmediate(() => this.runAbuseChecks(key, license.id, ip))
+
+    // Refresh IP bridge on every successful verify — stored in-memory + Redis (survives restarts)
+    if (ip) {
+      this.setIPBridge(ip, key)
+    }
 
     return {
       ok: true,
@@ -447,7 +504,24 @@ export class PublicApiService {
   async discoverLicense(params: { fingerprint: string; ip: string }): Promise<{ status: string; key?: string; expiresAt?: string }> {
     const { fingerprint, ip } = params
 
-    // Strategy 1: Look up device record
+    // Strategy 0: In-memory IP bridge + Redis backup (persists across server restarts)
+    if (ip) {
+      const memSession = ipSessions.get(ip)
+      const bridgeKey = (memSession && memSession.expiresAt > Date.now())
+        ? memSession.key
+        : await this.redis.get(`ip_bridge:${ip}`).catch(() => null)
+      if (bridgeKey) {
+        const lic = await this.prisma.license.findFirst({
+          where: { key: bridgeKey, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
+        })
+        if (lic) {
+          this.logger.log(`[DISCOVER] IP bridge -> key=${bridgeKey} ip=${ip}`)
+          return { status: 'active', key: lic.key, expiresAt: lic.expiresAt?.toISOString() }
+        }
+      }
+    }
+
+    // Strategy 1: Look up device record by real fingerprint (no time limit — same as web01.1 Strategy 2)
     if (fingerprint) {
       const devices = await this.prisma.device.findMany({
         where: { fingerprint },
@@ -457,11 +531,29 @@ export class PublicApiService {
       })
       const dev = devices[0]
       if (dev?.license && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(dev.license.status)) {
+        this.logger.log(`[DISCOVER] Device record -> key=${dev.license.key} fingerprint=${fingerprint}`)
         return { status: 'active', key: dev.license.key, expiresAt: dev.license.expiresAt?.toISOString() }
       }
     }
 
-    // Strategy 2: Recent activity by IP (last 24h)
+    // Strategy 1b: Auto IP-device lookup — present when user accessed repo/plugins from this IP
+    // (web01.1 equivalent: auto_ device registered on repo.json/plugins.json access)
+    if (ip) {
+      const autoFp = this.autoFingerprint(ip)
+      const autoDevices = await this.prisma.device.findMany({
+        where: { fingerprint: autoFp },
+        include: { license: true },
+        orderBy: { lastSeenAt: 'desc' },
+        take: 1,
+      })
+      const autoDev = autoDevices[0]
+      if (autoDev?.license && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(autoDev.license.status)) {
+        this.logger.log(`[DISCOVER] Auto IP device -> key=${autoDev.license.key} ip=${ip}`)
+        return { status: 'active', key: autoDev.license.key, expiresAt: autoDev.license.expiresAt?.toISOString() }
+      }
+    }
+
+    // Strategy 2: Recent activity by exact IP (last 24h)
     if (ip) {
       const recentLog = await this.prisma.activityLog.findFirst({
         where: {
@@ -472,8 +564,49 @@ export class PublicApiService {
         orderBy: { createdAt: 'desc' },
       })
       if (recentLog?.licenseKey) {
-        const lic = await this.prisma.license.findFirst({ where: { key: recentLog.licenseKey } })
+        const lic = await this.prisma.license.findFirst({ where: { key: recentLog.licenseKey, deletedAt: null } })
         if (lic && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(lic.status)) {
+          this.logger.log(`[DISCOVER] IP log match -> key=${lic.key} ip=${ip}`)
+          return { status: 'active', key: lic.key, expiresAt: lic.expiresAt?.toISOString() }
+        }
+      }
+    }
+
+    // Strategy 3: IPv4 subnet fallback (first 3 octets) — handles mobile CGNAT IP changes
+    if (ip && ip.includes('.')) {
+      const subnet = ip.split('.').slice(0, 3).join('.')
+      const subnetLog = await this.prisma.activityLog.findFirst({
+        where: {
+          ip: { startsWith: subnet + '.' },
+          licenseKey: { not: '' },
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (subnetLog?.licenseKey) {
+        const lic = await this.prisma.license.findFirst({ where: { key: subnetLog.licenseKey, deletedAt: null } })
+        if (lic && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(lic.status)) {
+          this.logger.log(`[DISCOVER] IPv4 subnet match -> key=${lic.key} subnet=${subnet}.x`)
+          return { status: 'active', key: lic.key, expiresAt: lic.expiresAt?.toISOString() }
+        }
+      }
+    }
+
+    // Strategy 4: IPv6 prefix fallback (first 4 groups = /64 prefix)
+    if (ip && ip.includes(':')) {
+      const prefix = ip.split(':').slice(0, 4).join(':')
+      const prefixLog = await this.prisma.activityLog.findFirst({
+        where: {
+          ip: { startsWith: prefix + ':' },
+          licenseKey: { not: '' },
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (prefixLog?.licenseKey) {
+        const lic = await this.prisma.license.findFirst({ where: { key: prefixLog.licenseKey, deletedAt: null } })
+        if (lic && ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'].includes(lic.status)) {
+          this.logger.log(`[DISCOVER] IPv6 prefix match -> key=${lic.key} prefix=${prefix}:`)
           return { status: 'active', key: lic.key, expiresAt: lic.expiresAt?.toISOString() }
         }
       }
@@ -486,11 +619,21 @@ export class PublicApiService {
   // Repo serving
   // ──────────────────────────────────────────────────────────
 
-  async getRepoManifest(key: string, serverUrl: string): Promise<{ ok: boolean; data?: any; message?: string }> {
+  async getRepoManifest(key: string, serverUrl: string, ip?: string): Promise<{ ok: boolean; data?: any; message?: string }> {
     const license = await this.prisma.license.findFirst({
       where: { key, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
     })
     if (!license) return { ok: false, message: 'License inactive or not found' }
+
+    // IP Bridge — in-memory + Redis + auto device (exactly like web01.1 repo.json)
+    if (ip) {
+      this.setIPBridge(ip, key)
+      this.logger.log(`[REPO] IP bridge set: ${ip} -> ${key}`)
+      this.upsertAutoDevice(license.id, ip).catch(() => {})
+      this.prisma.activityLog.create({
+        data: { type: 'VERIFY_OK' as any, severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'repo.json accessed' },
+      }).catch(() => {})
+    }
 
     return {
       ok: true,
@@ -503,11 +646,21 @@ export class PublicApiService {
     }
   }
 
-  async getPluginsList(key: string, serverUrl: string): Promise<{ ok: boolean; plugins?: PluginEntry[]; message?: string }> {
+  async getPluginsList(key: string, serverUrl: string, ip?: string): Promise<{ ok: boolean; plugins?: PluginEntry[]; message?: string }> {
     const license = await this.prisma.license.findFirst({
       where: { key, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
     })
     if (!license) return { ok: false, message: 'License inactive' }
+
+    // Refresh IP bridge + auto device (exactly like web01.1 plugins.json)
+    if (ip) {
+      this.setIPBridge(ip, key)
+      this.logger.log(`[PLUGINS] IP bridge refreshed: ${ip} -> ${key}`)
+      this.upsertAutoDevice(license.id, ip).catch(() => {})
+      this.prisma.activityLog.create({
+        data: { type: 'VERIFY_OK' as any, severity: 'LOW', licenseId: license.id, licenseKey: key, ip, message: 'plugins.json accessed' },
+      }).catch(() => {})
+    }
 
     const where: any = { isEnabled: true }
     if (license.allowedPlugins?.length > 0) {
@@ -536,11 +689,6 @@ export class PublicApiService {
         fileSize: p.size ?? 0,
       }
     })
-
-    // Log access async
-    setImmediate(() =>
-      this.logActivity({ type: 'PLUGIN_SESSION', severity: 'LOW', licenseKey: key, ip: '', message: `Plugins list accessed (${pluginList.length} plugins)` })
-    )
 
     return { ok: true, plugins: pluginList }
   }
@@ -610,6 +758,7 @@ export class PublicApiService {
   private actionToActivityType(action: string): string {
     const map: Record<string, string> = {
       PLAY: 'PLAYBACK_START',
+      DOWNLOAD: 'PLAYBACK_START',
       OPEN: 'PLUGIN_SESSION',
       HOME: 'PLUGIN_SESSION',
       SESSION: 'PLUGIN_SESSION',

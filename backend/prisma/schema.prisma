@@ -302,6 +302,8 @@ model ActivityLog {
   @@index([deviceId])
   @@index([createdAt])
   @@index([severity])
+  @@index([ip])
+  @@index([licenseKey])
   @@map("activity_logs")
 }
 
