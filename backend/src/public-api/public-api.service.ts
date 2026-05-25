@@ -803,8 +803,20 @@ export class PublicApiService {
     encoding: 'base64',
   }
 
-  async getSelectors(pluginName: string): Promise<{ ok: boolean; selectors?: any; message?: string }> {
-    const plugin = await this.prisma.plugin.findFirst({ where: { slug: pluginName } })
+  async getSelectors(pluginName: string, licenseKey?: string): Promise<{ ok: boolean; selectors?: any; message?: string }> {
+    // Re-validate license is still active (prevents use after revoke within 90s token window)
+    if (licenseKey) {
+      const lic = await this.prisma.license.findFirst({
+        where: { key: licenseKey, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
+      })
+      if (!lic) return { ok: false, message: 'Lisensi tidak aktif atau telah dicabut' }
+      if (lic.expiresAt && lic.expiresAt < new Date()) return { ok: false, message: 'Lisensi telah kadaluarsa' }
+    }
+
+    // Case-insensitive slug match
+    const plugin = await this.prisma.plugin.findFirst({
+      where: { slug: { equals: pluginName, mode: 'insensitive' } },
+    })
     if (!plugin?.metadata) return { ok: true, selectors: this.DEFAULT_SELECTORS }
 
     const meta = plugin.metadata as any
@@ -814,8 +826,20 @@ export class PublicApiService {
     return { ok: true, selectors: safeSelectors }
   }
 
-  async getSecretKeys(pluginName: string): Promise<{ ok: boolean; keys?: any; message?: string }> {
-    const plugin = await this.prisma.plugin.findFirst({ where: { slug: pluginName } })
+  async getSecretKeys(pluginName: string, licenseKey?: string): Promise<{ ok: boolean; keys?: any; message?: string }> {
+    // Re-validate license is still active
+    if (licenseKey) {
+      const lic = await this.prisma.license.findFirst({
+        where: { key: licenseKey, deletedAt: null, status: { in: ['ACTIVE', 'TRIAL', 'EXPIRING_SOON'] } },
+      })
+      if (!lic) return { ok: false, message: 'Lisensi tidak aktif atau telah dicabut' }
+      if (lic.expiresAt && lic.expiresAt < new Date()) return { ok: false, message: 'Lisensi telah kadaluarsa' }
+    }
+
+    // Case-insensitive slug match
+    const plugin = await this.prisma.plugin.findFirst({
+      where: { slug: { equals: pluginName, mode: 'insensitive' } },
+    })
     if (!plugin?.metadata) return { ok: false, message: 'Secret config not found' }
 
     const meta = plugin.metadata as any

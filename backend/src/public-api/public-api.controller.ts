@@ -184,8 +184,16 @@ export class PublicApiController {
     const { valid, payload, error } = this.service.verifyPluginToken(token)
     if (!valid) return { status: 'error', message: error }
 
-    const pluginName = payload.plugin_name ?? (body.plugin_name ?? '')
-    const result = await this.service.getSelectors(pluginName)
+    // Enforce JWT plugin_name binding — token for plugin A cannot get selectors for plugin B
+    const requestedPlugin = (body.plugin_name ?? '').trim()
+    const tokenPlugin = (payload.plugin_name ?? '').trim()
+    if (requestedPlugin && tokenPlugin && requestedPlugin.toLowerCase() !== tokenPlugin.toLowerCase()) {
+      return { status: 'error', message: 'Session token tidak cocok dengan plugin yang diminta' }
+    }
+    const pluginName = tokenPlugin || requestedPlugin
+
+    // Pass license_key for real-time revocation check
+    const result = await this.service.getSelectors(pluginName, payload.license_key)
     if (!result.ok) return { status: 'error', message: result.message }
 
     return { status: 'ok', plugin: pluginName, selectors: result.selectors, expires_at: Date.now() + 60_000 }
@@ -206,8 +214,9 @@ export class PublicApiController {
     const { valid, payload, error } = this.service.verifyPluginToken(token)
     if (!valid) return { status: 'error', message: error }
 
-    const pluginName = payload.plugin_name ?? ''
-    const result = await this.service.getSecretKeys(pluginName)
+    const pluginName = (payload.plugin_name ?? '').trim()
+    // Pass license_key for real-time revocation check
+    const result = await this.service.getSecretKeys(pluginName, payload.license_key)
     if (!result.ok) return { status: 'error', message: result.message }
 
     return { status: 'ok', ...result.keys }
