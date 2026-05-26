@@ -1,5 +1,5 @@
-import {
-  Controller, Post, Get, Body, Req, Res, UseGuards,
+﻿import {
+  Controller, Post, Get, Patch, Body, Req, Res, UseGuards,
   HttpCode, HttpStatus, Headers,
 } from '@nestjs/common'
 import { AuthGuard } from '@nestjs/passport'
@@ -7,6 +7,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { AuthService } from './auth.service'
 import { LoginDto } from './dto/login.dto'
 import { RefreshTokenDto } from './dto/refresh-token.dto'
+import { ChangePasswordDto } from './dto/change-password.dto'
+import { UpdateProfileDto } from './dto/update-profile.dto'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
 import { CurrentAdmin } from './decorators/current-admin.decorator'
 import type { Request } from 'express'
@@ -44,5 +46,28 @@ export class AuthController {
   @ApiBearerAuth()
   async me(@CurrentAdmin() admin: { id: string }) {
     return this.authService.getMe(admin.id)
+  }
+
+  @Patch('me/profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  async updateProfile(
+    @CurrentAdmin() admin: { id: string },
+    @Body() dto: UpdateProfileDto,
+    @Req() req: Request,
+  ) {
+    return this.authService.updateProfile(admin.id, dto, req.ip, req.headers['user-agent'])
+  }
+
+  @Patch('me/password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentAdmin() admin: { id: string },
+    @Body() dto: ChangePasswordDto,
+    @Req() req: Request,
+  ) {
+    return this.authService.changePassword(admin.id, dto, req.ip, req.headers['user-agent'])
   }
 }

@@ -1,0 +1,38 @@
+﻿{
+  "_comment": "Copy this file to .vps-config.json and fill in real values. NEVER commit .vps-config.json (already in .gitignore).",
+
+  "host": "YOUR_VPS_IP",
+  "user": "root",
+  "port": 22,
+
+  "auth": {
+    "_comment": "method: 'key' (recommended) or 'password'. Key auth needs a generated keypair (run setup-ssh-key.ps1).",
+    "method": "password",
+    "password": "YOUR_ROOT_PASSWORD",
+    "key_path": "~/.ssh/cs_vps_ed25519"
+  },
+
+  "remote": {
+    "app_dir": "/root/cloudstream",
+    "backend_dir": "/root/cloudstream/backend",
+    "frontend_dir": "/root/cloudstream/frontend",
+    "pm2_backend": "cs-backend",
+    "pm2_frontend": "cs-frontend",
+    "backend_url": "http://localhost:3001",
+    "public_domain": "https://your-domain.example"
+  },
+
+  "database": {
+    "url": "postgresql://cloudstream:CHANGE_ME@localhost:5432/cloudstream_prod"
+  },
+
+  "license": {
+    "_comment": "Admin license key used in audit/sync scripts. Treat as secret.",
+    "admin_key": "CS-PROD-XXXXXXXX"
+  },
+
+  "local": {
+    "project_dir": "D:\\APK\\CloudStream\\BACKUP NEW ADMIN\\1.1\\cloudstream-saas",
+    "plugins_json": "D:\\APK\\CloudStream\\BACKUP NEW ADMIN\\1.1\\CSNEW\\plugins.json"
+  }
+}

@@ -1,4 +1,4 @@
-import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+﻿import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import type { ApiResponse } from '@/types'
 
 function clearAllAuth() {
@@ -18,7 +18,7 @@ export const api = axios.create({
   withCredentials: true,
 })
 
-// ── Token helpers ──────────────────────────────────────────
+// â”€â”€ Token helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getAccessToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem('cs_access_token')
@@ -33,7 +33,7 @@ function clearTokens(): void {
   localStorage.removeItem('cs_refresh_token')
 }
 
-// ── Request interceptor ────────────────────────────────────
+// â”€â”€ Request interceptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getAccessToken()
@@ -45,7 +45,7 @@ api.interceptors.request.use(
   error => Promise.reject(error)
 )
 
-// ── Response interceptor (refresh token) ──────────────────
+// â”€â”€ Response interceptor (refresh token) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let isRefreshing = false
 let refreshQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = []
 
@@ -100,7 +100,7 @@ api.interceptors.response.use(
   }
 )
 
-// ── API helpers ────────────────────────────────────────────
+// â”€â”€ API helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function apiGet<T>(url: string, params?: Record<string, unknown>): Promise<T> {
   const response = await api.get<T>(url, { params })
   return response.data
@@ -126,13 +126,15 @@ export async function apiDelete<T>(url: string): Promise<T> {
   return response.data
 }
 
-// ── API Routes ─────────────────────────────────────────────
+// â”€â”€ API Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const endpoints = {
   auth: {
     login: '/auth/login',
     logout: '/auth/logout',
     refresh: '/auth/refresh',
     me: '/auth/me',
+    updateProfile: '/auth/me/profile',
+    changePassword: '/auth/me/password',
     sessions: '/auth/sessions',
     revokeSession: (id: string) => `/auth/sessions/${id}`,
   },
