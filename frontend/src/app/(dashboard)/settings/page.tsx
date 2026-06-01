@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useState, useEffect, type ElementType, type ReactNode } from 'react'
-import { apiGet, apiPatch, endpoints } from '@/lib/api'
+import { apiGet, apiPatch, apiPut, endpoints } from '@/lib/api'
 import { motion } from 'framer-motion'
 import {
   Settings, Save, RotateCcw, Shield, Bell, Key, Database,
@@ -26,7 +26,9 @@ export default function SettingsPage() {
   const [isDirty, setIsDirty] = useState(false)
 
   const [general, setGeneral] = useState({
-    defaultMaxDevices: 3,
+    defaultMaxDevices: 2,
+    defaultDurationDays: 30,
+    logRetentionDays: 30,
     defaultTrialDays: 7,
     licenseKeyPrefix: 'CS-PROD',
     autoBlockEnabled: true,
@@ -55,12 +57,74 @@ export default function SettingsPage() {
     emailFrom: 'noreply@cloudstream.app',
   })
 
-  const handleSave = () => {
-    toast.success('Settings saved successfully')
-    setIsDirty(false)
+  const handleSave = async () => {
+    try {
+      const updates: Array<[string, unknown]> = [
+        ['default_max_devices',        general.defaultMaxDevices],
+        ['default_duration_days',      general.defaultDurationDays],
+        ['log_retention_days',         general.logRetentionDays],
+        ['default_trial_days',         general.defaultTrialDays],
+        ['license_key_prefix',         general.licenseKeyPrefix],
+        ['auto_block_enabled',         general.autoBlockEnabled],
+        ['trust_score_threshold',      general.trustScoreThreshold],
+        ['maintenance_mode',           general.maintenanceMode],
+        ['timezone',                   general.timezone],
+        ['max_failed_attempts',        security.maxFailedAttempts],
+        ['burst_threshold',            security.burstThreshold],
+        ['burst_window_secs',          security.burstWindowSecs],
+        ['ip_rotation_limit',          security.ipRotationLimit],
+        ['vpn_block_enabled',          security.vpnBlockEnabled],
+        ['auto_revoke_on_abuse',       security.autoRevokeOnAbuse],
+        ['require_device_fingerprint', security.requireDeviceFingerprint],
+        ['abuse_alert_email',          notifications.abuseAlertEmail],
+        ['daily_report_enabled',       notifications.dailyReportEnabled],
+        ['critical_alert_enabled',     notifications.criticalAlertEnabled],
+        ['expiry_warning_days',        notifications.expiryWarningDays],
+      ]
+      await Promise.all(updates.map(([k, v]) => apiPut(`/settings/${k}`, { value: v })))
+      toast.success('Settings saved')
+      setIsDirty(false)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Failed to save settings')
+    }
   }
 
   const mark = () => setIsDirty(true)
+
+  // Load settings on mount
+  useEffect(() => {
+    apiGet<Record<string, unknown>>('/settings').then(s => {
+      setGeneral(g => ({
+        ...g,
+        defaultMaxDevices:    Number(s.default_max_devices ?? g.defaultMaxDevices),
+        defaultDurationDays:  Number(s.default_duration_days ?? g.defaultDurationDays),
+        logRetentionDays:     Number(s.log_retention_days ?? g.logRetentionDays),
+        defaultTrialDays:     Number(s.default_trial_days ?? g.defaultTrialDays),
+        licenseKeyPrefix:     String(s.license_key_prefix ?? g.licenseKeyPrefix),
+        autoBlockEnabled:     Boolean(s.auto_block_enabled ?? g.autoBlockEnabled),
+        trustScoreThreshold:  Number(s.trust_score_threshold ?? g.trustScoreThreshold),
+        maintenanceMode:      Boolean(s.maintenance_mode ?? g.maintenanceMode),
+        timezone:             String(s.timezone ?? g.timezone),
+      }))
+      setSecurity(sc => ({
+        ...sc,
+        maxFailedAttempts:        Number(s.max_failed_attempts ?? sc.maxFailedAttempts),
+        burstThreshold:           Number(s.burst_threshold ?? sc.burstThreshold),
+        burstWindowSecs:          Number(s.burst_window_secs ?? sc.burstWindowSecs),
+        ipRotationLimit:          Number(s.ip_rotation_limit ?? sc.ipRotationLimit),
+        vpnBlockEnabled:          Boolean(s.vpn_block_enabled ?? sc.vpnBlockEnabled),
+        autoRevokeOnAbuse:        Boolean(s.auto_revoke_on_abuse ?? sc.autoRevokeOnAbuse),
+        requireDeviceFingerprint: Boolean(s.require_device_fingerprint ?? sc.requireDeviceFingerprint),
+      }))
+      setNotifications(n => ({
+        ...n,
+        abuseAlertEmail:      String(s.abuse_alert_email ?? n.abuseAlertEmail),
+        dailyReportEnabled:   Boolean(s.daily_report_enabled ?? n.dailyReportEnabled),
+        criticalAlertEnabled: Boolean(s.critical_alert_enabled ?? n.criticalAlertEnabled),
+        expiryWarningDays:    Number(s.expiry_warning_days ?? n.expiryWarningDays),
+      }))
+    }).catch(() => { /* silent fail, keep defaults */ })
+  }, [])
 
   return (
     <div className="page-wrapper">
@@ -112,6 +176,9 @@ export default function SettingsPage() {
                   <FieldRow label="Default Max Devices" desc="Number of devices per license">
                     <input type="number" value={general.defaultMaxDevices} onChange={e => { setGeneral(p => ({ ...p, defaultMaxDevices: +e.target.value })); mark() }} className="input w-24 text-center" min={1} max={10} />
                   </FieldRow>
+                  <FieldRow label="Default License Duration (days)" desc="Used when creating non-trial licenses without explicit expiry. 0 = no expiry">
+                    <input type="number" value={general.defaultDurationDays} onChange={e => { setGeneral(p => ({ ...p, defaultDurationDays: +e.target.value })); mark() }} className="input w-24 text-center" min={0} max={3650} />
+                  </FieldRow>
                   <FieldRow label="Trial Duration (days)" desc="Days given for trial licenses">
                     <input type="number" value={general.defaultTrialDays} onChange={e => { setGeneral(p => ({ ...p, defaultTrialDays: +e.target.value })); mark() }} className="input w-24 text-center" min={1} max={90} />
                   </FieldRow>
@@ -130,6 +197,9 @@ export default function SettingsPage() {
                   </FieldRow>
                   <FieldRow label="Auto-Block Abusers" desc="Automatically block flagged IPs">
                     <Toggle value={general.autoBlockEnabled} onChange={v => { setGeneral(p => ({ ...p, autoBlockEnabled: v })); mark() }} />
+                  </FieldRow>
+                  <FieldRow label="Activity Log Retention (days)" desc="Auto-delete activity logs and playback history older than this. Set 0 to keep forever.">
+                    <input type="number" value={general.logRetentionDays} onChange={e => { setGeneral(p => ({ ...p, logRetentionDays: +e.target.value })); mark() }} className="input w-24 text-center" min={0} max={365} />
                   </FieldRow>
                   <FieldRow label="Maintenance Mode" desc="Puts API in read-only mode">
                     <Toggle value={general.maintenanceMode} onChange={v => { setGeneral(p => ({ ...p, maintenanceMode: v })); mark() }} danger />

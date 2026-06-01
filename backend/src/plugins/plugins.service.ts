@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
+﻿import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import * as https from 'https'
 import * as http from 'http'
+import * as fs from 'fs'
+import * as path from 'path'
 
 @Injectable()
 export class PluginsService {
@@ -16,15 +18,76 @@ export class PluginsService {
       .then(items => this.prisma.plugin.count({ where }).then(total => ({ items, total })))
   }
 
+  private async downloadCs3ToVps(sourceUrl: string, internalName: string): Promise<{ vpsUrl: string; size: number; filename: string }> {
+    const uploadDir = process.env.APK_UPLOAD_DIR || '/var/www/html/apk-uploads'
+    try { await fs.promises.mkdir(uploadDir, { recursive: true }) } catch {}
+    const ts = Date.now()
+    const safe = (internalName || 'plugin').toString().replace(/[^a-zA-Z0-9_-]/g, '') || 'plugin'
+    const filename = `${ts}_${safe}.cs3`
+    const filepath = path.join(uploadDir, filename)
+
+    const client = sourceUrl.startsWith('https') ? https : http
+    const ua = { headers: { 'User-Agent': 'CloudStreamAdmin/2.0' } }
+
+    await new Promise<void>((resolve, reject) => {
+      const file = fs.createWriteStream(filepath)
+      const req = client.get(sourceUrl, ua, (res) => {
+        if (res.statusCode !== 200) { file.close(); fs.unlink(filepath, () => {}); reject(new Error(`HTTP ${res.statusCode}`)); return }
+        res.pipe(file)
+        file.on('finish', () => { file.close(); resolve() })
+      })
+      req.on('error', (err) => { file.close(); fs.unlink(filepath, () => {}); reject(err) })
+      req.setTimeout(20000, () => { req.destroy(new Error('timeout')) })
+    })
+
+    const stat = await fs.promises.stat(filepath)
+    const baseUrl = (process.env.SERVER_URL || 'https://faxecez.eu.org').replace(/\/$/, '')
+    return { vpsUrl: `${baseUrl}/apk/${filename}`, size: stat.size, filename }
+  }
+
   async findOne(id: string) {
     const plugin = await this.prisma.plugin.findFirst({ where: { OR: [{ id }, { slug: id }] } })
     if (!plugin) throw new NotFoundException('Plugin not found')
     return plugin
   }
 
-  create(data: any) { return this.prisma.plugin.create({ data }) }
-  update(id: string, data: any) { return this.prisma.plugin.update({ where: { id }, data }) }
-  remove(id: string) { return this.prisma.plugin.delete({ where: { id } }) }
+  async create(data: any, adminId?: string) {
+    const plugin = await this.prisma.plugin.create({ data })
+    if (adminId) {
+      await this.prisma.adminLog.create({
+        data: { adminId, action: 'CREATE_PLUGIN', target: plugin.name, targetType: 'PLUGIN', details: { slug: plugin.slug } as any },
+      }).catch(() => {})
+    }
+    return plugin
+  }
+  async update(id: string, data: any, adminId?: string) {
+    const before = await this.prisma.plugin.findUnique({ where: { id } })
+    const plugin = await this.prisma.plugin.update({ where: { id }, data })
+    if (adminId) {
+      const diff: any = {}
+      if (before) {
+        for (const k of Object.keys(data)) {
+          if (JSON.stringify((before as any)[k]) !== JSON.stringify((data as any)[k])) {
+            diff[k] = { from: (before as any)[k], to: (data as any)[k] }
+          }
+        }
+      }
+      await this.prisma.adminLog.create({
+        data: { adminId, action: 'UPDATE_PLUGIN', target: plugin.name, targetType: 'PLUGIN', diff: diff as any },
+      }).catch(() => {})
+    }
+    return plugin
+  }
+  async remove(id: string, adminId?: string) {
+    const plugin = await this.prisma.plugin.findUnique({ where: { id } })
+    await this.prisma.plugin.delete({ where: { id } })
+    if (adminId && plugin) {
+      await this.prisma.adminLog.create({
+        data: { adminId, action: 'DELETE_PLUGIN', target: plugin.name, targetType: 'PLUGIN', details: { slug: plugin.slug } as any },
+      }).catch(() => {})
+    }
+    return { id }
+  }
 
   private fetchUrl(url: string, timeoutMs = 15000): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -52,6 +115,7 @@ export class PluginsService {
       version: String(p.version || '1.0.0'),
       category: (p.tvTypes?.[0] || p.types?.[0] || p.category || 'General'),
       fileUrl: p.url || p.fileUrl || null,
+      size: 0,
       iconUrl: p.iconUrl || null,
       isEnabled: true,
       metadata: {
@@ -81,7 +145,7 @@ export class PluginsService {
     }
   }
 
-  async importFromRepo(url: string) {
+  async importFromRepo(url: string, adminId?: string) {
     if (!url) throw new BadRequestException('URL is required')
     const json = await this.fetchUrl(url)
     const list: any[] = Array.isArray(json) ? json : (json.plugins || json.data || [])
@@ -94,10 +158,20 @@ export class PluginsService {
       if (!p.internalName && !p.name) { skipped++; continue }
       try {
         const data = this.normalizePlugin(p)
+        // Mirror to VPS when possible
+        if (data.fileUrl) {
+          try {
+            const info = await this.downloadCs3ToVps(data.fileUrl, p.internalName || data.slug)
+            data.fileUrl = info.vpsUrl
+            data.size = info.size
+          } catch (_) {
+            // keep original URL on failure
+          }
+        }
         await this.prisma.plugin.upsert({
           where: { slug: data.slug },
           update: { name: data.name, description: data.description, version: data.version,
-            category: data.category, fileUrl: data.fileUrl, iconUrl: data.iconUrl, metadata: data.metadata },
+            category: data.category, fileUrl: data.fileUrl, size: data.size, iconUrl: data.iconUrl, metadata: data.metadata },
           create: data,
         })
         imported++
@@ -111,14 +185,16 @@ export class PluginsService {
     return { imported, skipped, errors, total: plugins.length, items: plugins }
   }
 
-  async clearAll() {
+  async clearAll(adminId?: string) {
     await this.prisma.pluginUsageLog.deleteMany()
     await this.prisma.pluginVersion.deleteMany()
     const { count } = await this.prisma.plugin.deleteMany()
+    if (adminId) await this.prisma.adminLog.create({ data: { adminId, action: 'DELETE_PLUGIN' as any, target: 'all plugins (clear)', targetType: 'PLUGIN', details: { count } as any } }).catch(() => {})
+
     return { deleted: count }
   }
 
-  async syncFromRepo(url: string) {
+  async syncFromRepo(url: string, adminId?: string) {
     if (!url) throw new BadRequestException('URL is required')
     const json = await this.fetchUrl(url)
     const list: any[] = Array.isArray(json) ? json : (json.plugins || json.data || [])
@@ -135,7 +211,15 @@ export class PluginsService {
     for (const p of list) {
       if (!p.internalName && !p.name) { skipped++; continue }
       try {
-        await this.prisma.plugin.create({ data: this.normalizePlugin(p) })
+        const data = this.normalizePlugin(p)
+        if (data.fileUrl) {
+          try {
+            const info = await this.downloadCs3ToVps(data.fileUrl, p.internalName || data.slug)
+            data.fileUrl = info.vpsUrl
+            data.size = info.size
+          } catch (_) {}
+        }
+        await this.prisma.plugin.create({ data })
         imported++
       } catch (e: any) {
         errors.push(`${p.internalName || p.name}: ${e.message}`)

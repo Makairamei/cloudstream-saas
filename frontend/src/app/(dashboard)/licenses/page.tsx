@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Key, Plus, Search, Filter, Download, MoreHorizontal,
   Copy, RotateCcw, Ban, CheckCircle, Clock, AlertTriangle,
-  ChevronDown, ChevronUp, ChevronsUpDown, Shield, Eye, Trash2
+  ChevronDown, ChevronUp, ChevronsUpDown, Shield, Eye, Trash2, ArrowLeft, RefreshCw
 } from 'lucide-react'
 import { cn, formatDate, formatRelativeTime, getLicenseStatusColor, getLicenseStatusLabel, maskLicenseKey, copyToClipboard } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -43,6 +43,7 @@ export default function LicensesPage() {
   const [actionMenu, setActionMenu] = useState<{ license: License; top: number; right: number } | null>(null)
   const [confirmModal, setConfirmModal] = useState<{ action: 'revoke' | 'activate' | 'delete'; license: License } | null>(null)
   const [bulkConfirm, setBulkConfirm] = useState<'deactivate' | 'delete' | null>(null)
+  const [viewMode, setViewMode] = useState<string>('active')
 
   const fetchLicenses = useCallback(async () => {
     setLoading(true)
@@ -51,9 +52,9 @@ export default function LicensesPage() {
       const data = await apiGet<{ items: License[]; total: number }>('/licenses?limit=500')
       setLicenses(data.items ?? [])
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || 'Gagal memuat lisensi'
+      const msg = (err as { message?: string })?.message || 'Failed to load licenses'
       setLoadError(msg)
-      toast.error('Gagal memuat lisensi — klik Retry')
+      toast.error('Failed to load licenses - click Retry')
     } finally { setLoading(false) }
   }, [])
 
@@ -95,6 +96,10 @@ export default function LicensesPage() {
     return sortDir === 'asc' ? <ChevronUp className="w-3 h-3 text-indigo-400" /> : <ChevronDown className="w-3 h-3 text-indigo-400" />
   }
 
+  if (viewMode === 'bin') {
+    return <RecycleBinView onBack={() => setViewMode('active')} />
+  }
+
   return (
     <>
       <div className="page-wrapper">
@@ -105,6 +110,16 @@ export default function LicensesPage() {
           <p className="text-sm text-slate-500 mt-0.5">{licenses.length} total licenses</p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 p-1 rounded-xl card">
+            <button
+              onClick={() => setViewMode('active')}
+              className={cn('px-3 py-1.5 rounded-lg text-xs font-medium transition', viewMode === 'active' ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/20' : 'text-slate-500 hover:text-slate-300')}
+            >Active</button>
+            <button
+              onClick={() => setViewMode('bin')}
+              className={cn('px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5', viewMode === 'bin' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/25' : 'text-slate-500 hover:text-slate-300')}
+            ><Trash2 className="w-3 h-3" />Recycle Bin</button>
+          </div>
           <button className="btn-ghost btn-sm flex items-center gap-2">
             <Download className="w-3.5 h-3.5" />
             Export
@@ -262,7 +277,7 @@ export default function LicensesPage() {
         {loadError && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm border border-red-500/25 bg-red-500/[0.08] text-red-400">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            <span className="flex-1">Gagal memuat lisensi: <span className="font-mono text-xs opacity-80">{loadError}</span></span>
+            <span className="flex-1">Failed to load licenses: <span className="font-mono text-xs opacity-80">{loadError}</span></span>
             <button onClick={fetchLicenses} className="px-3 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-xs font-semibold border border-red-500/25 transition-colors">
               Retry
             </button>
@@ -347,17 +362,21 @@ export default function LicensesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-medium text-slate-300">
-                        {license.activeDevices}/{license.maxDevices}
-                      </div>
-                      <div className="flex-1 h-1 rounded-full bg-white/[0.06] overflow-hidden w-12">
-                        <div
-                          className={cn('h-full rounded-full', license.activeDevices / license.maxDevices >= 0.9 ? 'bg-red-500' : license.activeDevices / license.maxDevices >= 0.6 ? 'bg-amber-500' : 'bg-indigo-500')}
-                          style={{ width: `${(license.activeDevices / license.maxDevices) * 100}%` }}
-                        />
-                      </div>
-                    </div>
+                    {(() => {
+                      const used = license.activeDevices ?? 0
+                      const max  = license.maxDevices ?? 0
+                      const ratio = max > 0 ? used / max : 0
+                      const dot = ratio >= 0.9 ? 'bg-red-500' : ratio >= 0.6 ? 'bg-amber-500' : 'bg-emerald-500'
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', dot)} />
+                          <span className="text-sm font-medium text-slate-300 tabular-nums">
+                            {used}
+                            <span className="text-2xs text-slate-600 ml-1">/ {max}</span>
+                          </span>
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <div className={cn('text-xs', license.status === 'EXPIRED' ? 'text-red-400' : license.status === 'EXPIRING_SOON' ? 'text-amber-400' : 'text-slate-400')}>
@@ -424,7 +443,7 @@ export default function LicensesPage() {
       onStatusChange={(id, status) => setLicenses(prev => prev.map(l => l.id === id ? { ...l, status: status as LicenseStatus } : l))}
     />
 
-    {/* ─── Action dropdown menu ─── */}
+    {/* Action dropdown menu */}
     {actionMenu && createPortal(
       <>
         <div className="fixed inset-0 z-[100]" onClick={() => setActionMenu(null)} />
@@ -471,7 +490,7 @@ export default function LicensesPage() {
       document.body
     )}
 
-    {/* ─── Confirm action modal ─── */}
+    {/* Confirm action modal */}
     {confirmModal && createPortal(
       <motion.div
         initial={{ opacity: 0 }}
@@ -556,12 +575,12 @@ export default function LicensesPage() {
   )
 }
 
-// ── Create License Modal ────────────────────────────────────
+// Create License Modal -Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â-Â
 function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCreated: (license: unknown) => void }) {
   const [form, setForm] = useState<CreateLicenseDto>({
     name: '',
     email: '',
-    maxDevices: 3,
+    maxDevices: 2,
     gracePeriodDays: 7,
     isTrial: false,
     expiresAt: '',
@@ -571,6 +590,24 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+
+  // Load defaults from /settings on mount and prefill form
+  useEffect(() => {
+    apiGet<Record<string, unknown>>('/settings').then(s => {
+      const defMax  = Number(s.default_max_devices ?? 2)
+      const defDur  = Number(s.default_duration_days ?? 30)
+      const defGrace = Number(s.default_grace_period_days ?? 7)
+      const expiry = defDur > 0
+        ? new Date(Date.now() + defDur * 86400000).toISOString().split('T')[0]
+        : ''
+      setForm(prev => ({
+        ...prev,
+        maxDevices: defMax,
+        gracePeriodDays: defGrace,
+        expiresAt: expiry,
+      }))
+    }).catch(() => {})
+  }, [])
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name.trim()) { toast.error('Nama wajib diisi'); return }
@@ -579,7 +616,7 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
         email: form.email?.trim() || undefined,
-        maxDevices: form.maxDevices ?? 3,
+        maxDevices: form.maxDevices,
         gracePeriodDays: form.gracePeriodDays ?? 7,
         isTrial: form.isTrial,
         notes: form.notes?.trim() || undefined,
@@ -640,7 +677,7 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
             </div>
           </div>
           <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-all">
-            <span className="text-lg leading-none">×</span>
+            <span className="text-lg leading-none"></span>
           </button>
         </div>
 
@@ -701,7 +738,7 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
             {!form.isTrial && (
               <div>
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5 block">
-                  Masa Aktif <span className="text-slate-400">(kosong = seumur hidup)</span>
+                  Masa Aktif <span className="text-slate-400">(kosong = Lifetime </span>
                 </label>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {EXPIRY_PRESETS.map(p => (
@@ -722,7 +759,7 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
                         ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-600 dark:text-emerald-400'
                         : 'border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-400 hover:border-emerald-400/40'
                     }`}>
-                    Seumur Hidup ♾
+                    Lifetime
                   </button>
                 </div>
                 <input type="date" value={form.expiresAt || ''} onChange={e => set('expiresAt', e.target.value)}
@@ -756,5 +793,311 @@ function CreateLicenseModal({ onClose, onCreated }: { onClose: () => void; onCre
         </form>
       </motion.div>
     </motion.div>
+  )
+}
+
+
+// Recycle Bin view: checkbox + bulk restore/purge with soft palette
+type DeletedLicense = {
+  id: string
+  key: string
+  name: string
+  email: string | null
+  status: string
+  expiresAt: string | null
+  deletedAt: string
+  purgeAt: string
+  daysLeft: number
+  hoursLeft: number
+}
+
+function RecycleBinView({ onBack }: { onBack: () => void }) {
+  const [items, setItems] = useState<DeletedLicense[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirm, setConfirm] = useState<{ action: 'restore' | 'purge'; ids: string[]; keys: string[] } | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await apiGet<{ items: DeletedLicense[] }>('/licenses/recycle-bin?limit=200')
+      setItems(data.items ?? [])
+      setSelected(new Set())
+    } catch {
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const toggleOne = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    if (selected.size === items.length && items.length > 0) setSelected(new Set())
+    else setSelected(new Set(items.map(i => i.id)))
+  }
+
+  const runBulk = async (action: 'restore' | 'purge', ids: string[]) => {
+    setBusy(true)
+    try {
+      let ok = 0, fail = 0
+      const restoredTotals = { devices: 0, activityLogs: 0, playbackLogs: 0 }
+      for (const id of ids) {
+        try {
+          if (action === 'restore') {
+            const r = await apiPatch<any>(`/licenses/${id}/restore`, {})
+            const re = r?.restored
+            if (re) {
+              restoredTotals.devices      += re.devices ?? 0
+              restoredTotals.activityLogs += re.activityLogs ?? 0
+              restoredTotals.playbackLogs += re.playbackLogs ?? 0
+            }
+          } else {
+            await apiDelete(`/licenses/${id}/hard`)
+          }
+          ok++
+        } catch { fail++ }
+      }
+      if (action === 'restore') {
+        toast.success(`Restored ${ok} license${ok !== 1 ? 's' : ''} (${restoredTotals.devices} devices, ${restoredTotals.activityLogs} logs, ${restoredTotals.playbackLogs} playbacks)${fail ? ` - ${fail} failed` : ''}`)
+      } else {
+        toast.success(`Permanently deleted ${ok} license${ok !== 1 ? 's' : ''}${fail ? ` - ${fail} failed` : ''}`)
+      }
+      setConfirm(null)
+      load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const allSelected = items.length > 0 && selected.size === items.length
+  const someSelected = selected.size > 0 && selected.size < items.length
+
+  return (
+    <div className="page-wrapper">
+      <div className="page-header">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="btn-icon btn-sm" title="Back to active">
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-amber-500" />
+              Recycle Bin
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Soft-deleted licenses, auto-purged after 7 days. {items.length} item{items.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+        <button onClick={load} className="btn-ghost btn-sm flex items-center gap-2">
+          <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 flex items-start gap-3">
+        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div>
+          Restoring a license will also restore its associated devices, activity logs, and playback history.
+          Items remaining here past 7 days will be permanently purged automatically.
+        </div>
+      </div>
+
+      {selected.size > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card p-3 flex items-center justify-between gap-3"
+        >
+          <div className="text-sm text-slate-300">
+            <span className="font-semibold text-indigo-400">{selected.size}</span> selected
+            <button onClick={() => setSelected(new Set())} className="ml-3 text-2xs text-slate-500 hover:text-slate-300">Clear</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirm({ action: 'restore', ids: Array.from(selected), keys: items.filter(i => selected.has(i.id)).map(i => i.key) })}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/40 transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Restore selected
+            </button>
+            <button
+              onClick={() => setConfirm({ action: 'purge', ids: Array.from(selected), keys: items.filter(i => selected.has(i.id)).map(i => i.key) })}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/10 text-red-700 dark:text-red-300 hover:bg-red-500/20 border border-red-500/40 transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete forever
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      <div className="card p-0 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-slate-500">
+            <RefreshCw className="w-5 h-5 mr-2 animate-spin" />Loading bin...
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Trash2 className="w-10 h-10 text-slate-700 mb-3" />
+            <p className="text-sm font-medium text-slate-500">Recycle Bin is empty</p>
+            <p className="text-xs text-slate-700 mt-1">Deleted licenses will appear here for 7 days</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 px-5 py-3 border-b border-white/[0.05] bg-white/[0.02] text-2xs uppercase tracking-wider text-slate-600 font-medium">
+              <label className="flex items-center cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={el => { if (el) el.indeterminate = someSelected }}
+                  onChange={toggleAll}
+                  className="cs-checkbox"
+                />
+              </label>
+              <div className="flex-1">License</div>
+              <div className="w-36 text-right">Time left</div>
+              <div className="w-44 text-right">Actions</div>
+            </div>
+            <div className="divide-y divide-white/[0.04]">
+              {items.map(l => {
+                const isSelected = selected.has(l.id)
+                return (
+                  <div
+                    key={l.id}
+                    className={cn(
+                      'flex items-center gap-4 px-5 py-3 transition-colors',
+                      isSelected ? 'bg-indigo-500/[0.06] hover:bg-indigo-500/[0.10]' : 'hover:bg-white/[0.02]'
+                    )}
+                  >
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleOne(l.id)}
+                        className="cs-checkbox"
+                      />
+                    </label>
+                    <div className="w-9 h-9 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center flex-shrink-0">
+                      <Key className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <code className="text-sm font-mono font-semibold text-slate-200">{l.key}</code>
+                        {l.name && <>
+                          <span className="text-xs text-slate-700">.</span>
+                          <span className="text-xs text-slate-400 truncate">{l.name}</span>
+                        </>}
+                        {l.email && <>
+                          <span className="text-xs text-slate-700">.</span>
+                          <span className="text-xs text-slate-600 truncate">{l.email}</span>
+                        </>}
+                      </div>
+                      <div className="text-2xs text-slate-700 mt-0.5">
+                        Deleted {new Date(l.deletedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="w-36 text-right flex-shrink-0">
+                      <span className={cn(
+                        'inline-flex px-2 py-0.5 rounded-full text-2xs font-medium border',
+                        l.daysLeft <= 1
+                          ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/40'
+                          : l.daysLeft <= 3
+                            ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/40'
+                            : 'bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600'
+                      )}>
+                        {l.daysLeft > 0 ? `${l.daysLeft} day${l.daysLeft !== 1 ? 's' : ''} left` : `${l.hoursLeft}h left`}
+                      </span>
+                    </div>
+                    <div className="w-44 flex items-center justify-end gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => setConfirm({ action: 'restore', ids: [l.id], keys: [l.key] })}
+                        disabled={busy}
+                        className="px-2.5 py-1 rounded-lg text-2xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/40 transition disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Restore
+                      </button>
+                      <button
+                        onClick={() => setConfirm({ action: 'purge', ids: [l.id], keys: [l.key] })}
+                        disabled={busy}
+                        className="px-2.5 py-1 rounded-lg text-2xs font-semibold bg-red-500/10 text-red-700 dark:text-red-300 hover:bg-red-500/20 border border-red-500/40 transition disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {confirm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !busy && setConfirm(null)}
+        >
+          <div onClick={e => e.stopPropagation()} className="card p-6 max-w-md w-full">
+            <div className="flex items-start gap-3 mb-4">
+              <div className={cn(
+                'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border',
+                confirm.action === 'restore' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40' : 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/40'
+              )}>
+                {confirm.action === 'restore' ? <RotateCcw className="w-5 h-5" /> : <Trash2 className="w-5 h-5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-semibold text-slate-100">
+                  {confirm.action === 'restore'
+                    ? `Restore ${confirm.ids.length} license${confirm.ids.length !== 1 ? 's' : ''}?`
+                    : `Permanently delete ${confirm.ids.length} license${confirm.ids.length !== 1 ? 's' : ''}?`}
+                </h3>
+                <div className="mt-2 max-h-32 overflow-y-auto cs-scroll text-2xs font-mono text-slate-500 space-y-0.5">
+                  {confirm.keys.slice(0, 20).map(k => <div key={k}>{k}</div>)}
+                  {confirm.keys.length > 20 && <div className="text-slate-600">+ {confirm.keys.length - 20} more</div>}
+                </div>
+              </div>
+            </div>
+            <p className="text-sm text-slate-400 mb-5">
+              {confirm.action === 'restore'
+                ? 'This will restore the selected licenses and all their associated devices, activity logs, and playback history.'
+                : 'This action cannot be undone. The selected licenses and all their associated data will be permanently deleted from the database.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => !busy && setConfirm(null)}
+                disabled={busy}
+                className="btn-ghost btn-sm"
+              >Cancel</button>
+              <button
+                onClick={() => runBulk(confirm.action, confirm.ids)}
+                disabled={busy}
+                className={cn(
+                  'btn-sm rounded-lg px-4 py-1.5 text-xs font-semibold transition disabled:opacity-50',
+                  confirm.action === 'restore'
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/40'
+                    : 'bg-red-500/10 text-red-700 dark:text-red-300 hover:bg-red-500/20 border border-red-500/40'
+                )}
+              >
+                {busy ? 'Working...' : confirm.action === 'restore' ? `Restore ${confirm.ids.length}` : `Delete ${confirm.ids.length} forever`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

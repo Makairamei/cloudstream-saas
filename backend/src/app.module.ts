@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+﻿import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { ScheduleModule } from '@nestjs/schedule'
@@ -15,6 +15,7 @@ import { AdminLogsModule } from './admin-logs/admin-logs.module'
 import { SettingsModule } from './settings/settings.module'
 import { WebsocketModule } from './websocket/websocket.module'
 import { NotificationsModule } from './notifications/notifications.module'
+import { PlaybackModule } from './playback/playback.module'
 import { PublicApiModule } from './public-api/public-api.module'
 
 @Module({
@@ -35,6 +36,7 @@ import { PublicApiModule } from './public-api/public-api.module'
     SettingsModule,
     WebsocketModule,
     NotificationsModule,
+    PlaybackModule,
     PublicApiModule,
   ],
 })

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common'
+﻿import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { ActivityService } from './activity.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -8,4 +8,5 @@ export class ActivityController {
   constructor(private readonly service: ActivityService) {}
   @Get() findAll(@Query() q: any) { return this.service.findAll(q) }
   @Get('stats') getStats() { return this.service.getStats() }
+  @Post('purge-now') purgeNow() { return this.service.runPurgeNow() }
 }

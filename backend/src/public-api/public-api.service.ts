@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common'
+﻿import { Injectable, Logger, Inject } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
@@ -7,9 +7,9 @@ import { REDIS_CLIENT } from '../redis/redis.module'
 import Redis from 'ioredis'
 import * as crypto from 'crypto'
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Types
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface VerifyResult {
   ok: boolean
@@ -35,9 +35,9 @@ export interface PluginEntry {
   fileSize: number
 }
 
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Error messages (Indonesian, matches old server)
-// ─────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ERR_MESSAGES: Record<string, string> = {
   LICENSE_NOT_FOUND: 'Lisensi tidak ditemukan',
@@ -52,8 +52,8 @@ const ERR_MESSAGES: Record<string, string> = {
   INVALID_DEVICE:    'Device ID tidak valid.',
 }
 
-// In-memory IP session bridge — same as reference server's ipSessions Map.
-// Maps ip → { key, expiresAt } for 6 hours after repo.json is loaded.
+// In-memory IP session bridge â€” same as reference server's ipSessions Map.
+// Maps ip â†’ { key, expiresAt } for 6 hours after repo.json is loaded.
 // Lets /api/discover return the license key to the plugin on first run.
 const ipSessions = new Map<string, { key: string; expiresAt: number }>()
 setInterval(() => {
@@ -73,9 +73,9 @@ export class PublicApiService {
     @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Internal helpers
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   private deviceHash(fingerprint: string, licenseId: string): string {
     return crypto.createHash('sha256').update(`${fingerprint}:${licenseId}`).digest('hex')
@@ -107,7 +107,7 @@ export class PublicApiService {
     this.redis.setex(`ip_bridge:${ip}`, 6 * 60 * 60, key).catch(() => {})
   }
 
-  // Recovery: try IP bridge → auto-device → device fingerprint → activityLog (web01.1 allowRecovery=true)
+  // Recovery: try IP bridge â†’ auto-device â†’ device fingerprint â†’ activityLog (web01.1 allowRecovery=true)
   private async recoverKeyForIP(ip: string, fingerprint: string): Promise<string | null> {
     if (ip) {
       const mem = ipSessions.get(ip)
@@ -225,28 +225,25 @@ export class PublicApiService {
 
   private async runAbuseChecks(licenseKey: string, licenseId: string, ip: string): Promise<void> {
     try {
-      // Check for burst requests from same license in last 30s
+      // 1. Burst requests from same license in last 30s
       const recentCount = await this.prisma.activityLog.count({
-        where: {
-          licenseKey,
-          createdAt: { gte: new Date(Date.now() - 30_000) },
-        },
+        where: { licenseKey, createdAt: { gte: new Date(Date.now() - 30_000) } },
       })
 
       if (recentCount > 50) {
         await this.prisma.securityEvent.create({
           data: {
-            type: 'BURST_REQUEST',
-            severity: 'MEDIUM',
-            licenseKey,
-            ip,
+            type: 'BURST_REQUEST', severity: 'MEDIUM',
+            licenseKey, ip,
             message: `${recentCount}+ verify requests within 30 seconds`,
           },
         })
         this.gateway.emitSecurityAlert({ type: 'BURST_REQUEST', licenseKey, ip, count: recentCount })
+        // Trust score: -2 per excess burst (cap penalty -10 per check)
+        await this.adjustTrustScore(licenseId, Math.min(10, Math.floor((recentCount - 50) / 10) + 2))
       }
 
-      // Check for too many unique IPs on same license in last 1h
+      // 2. Unique IPs in last 1h
       const recentLogs = await this.prisma.activityLog.findMany({
         where: { licenseKey, createdAt: { gte: new Date(Date.now() - 3_600_000) }, ip: { not: null } },
         select: { ip: true },
@@ -256,23 +253,68 @@ export class PublicApiService {
       if (recentLogs.length > 12) {
         await this.prisma.securityEvent.create({
           data: {
-            type: 'IP_ROTATION',
-            severity: 'MEDIUM',
-            licenseKey,
-            ip,
+            type: 'IP_ROTATION', severity: 'MEDIUM',
+            licenseKey, ip,
             message: `${recentLogs.length} different IPs used for same license in 1 hour`,
           },
         })
         this.gateway.emitSecurityAlert({ type: 'IP_ROTATION', licenseKey, ipCount: recentLogs.length })
+        // -3 per excess IP (5 over the 12 limit -> -15)
+        await this.adjustTrustScore(licenseId, Math.min(20, (recentLogs.length - 12) * 3))
+      }
+
+      // 3. Sustained high IP count over 24h (long-term sharing pattern)
+      const dayIps = await this.prisma.activityLog.findMany({
+        where: { licenseKey, createdAt: { gte: new Date(Date.now() - 86_400_000) }, ip: { not: null } },
+        select: { ip: true },
+        distinct: ['ip'],
+      })
+      if (dayIps.length > 25) {
+        await this.adjustTrustScore(licenseId, 5)
+      }
+
+      // 4. Active device count > maxDevices (already checked at register, but recompute trust)
+      const license = await this.prisma.license.findUnique({
+        where: { id: licenseId },
+        include: { devices: { where: { deletedAt: null, NOT: { fingerprint: { startsWith: 'auto_' } } } } },
+      })
+      if (license && license.maxDevices > 0 && license.devices.length > license.maxDevices) {
+        await this.adjustTrustScore(licenseId, (license.devices.length - license.maxDevices) * 5)
+      }
+
+      // 5. Slow recovery: if license was clean for 7d (no security events), gently restore +1
+      const recentSecEvents = await this.prisma.securityEvent.count({
+        where: { licenseKey, createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) } },
+      })
+      if (recentSecEvents === 0) {
+        await this.adjustTrustScore(licenseId, -1) // negative = increase
       }
     } catch (e) {
-      this.logger.warn('Abuse check failed', e)
+      this.logger.warn('Abuse check failed', e as any)
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // Adjust trust score in [0, 100]. Positive `penalty` decreases, negative increases.
+  private async adjustTrustScore(licenseId: string, penalty: number): Promise<void> {
+    try {
+      const lic = await this.prisma.license.findUnique({ where: { id: licenseId }, select: { trustScore: true } })
+      if (!lic) return
+      const current = lic.trustScore ?? 100
+      const next = Math.max(0, Math.min(100, current - penalty))
+      if (next !== current) {
+        await this.prisma.license.update({
+          where: { id: licenseId },
+          data: { trustScore: next },
+        })
+      }
+    } catch (e) {
+      this.logger.warn('adjustTrustScore failed', e as any)
+    }
+  }
+
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Core: verify license + register/check device
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async verifyAndTrack(params: {
     key: string
@@ -310,7 +352,7 @@ export class PublicApiService {
       include: { devices: true },
     })
 
-    // Recovery: if key not found/deleted, try IP bridge/device/log — matches web01.1 resolveLicenseForRequest(allowRecovery=true)
+    // Recovery: if key not found/deleted, try IP bridge/device/log â€” matches web01.1 resolveLicenseForRequest(allowRecovery=true)
     if (!license) {
       const recoveredKey = await this.recoverKeyForIP(ip, fingerprint)
       if (recoveredKey && recoveredKey !== key) {
@@ -341,7 +383,7 @@ export class PublicApiService {
       return { ok: false, reason: 'suspended', message: ERR_MESSAGES.SUSPENDED }
     }
 
-    // Expiry check — auto-expire in DB
+    // Expiry check â€” auto-expire in DB
     if (license.expiresAt && license.expiresAt < new Date()) {
       if (license.status !== 'EXPIRED') {
         await this.prisma.license.update({ where: { id: license.id }, data: { status: 'EXPIRED' } })
@@ -369,7 +411,7 @@ export class PublicApiService {
         await this.logActivity({
           type: 'ABUSE_DETECTED', severity: 'HIGH',
           licenseId: license.id, licenseKey: key, ip,
-          message: `DEVICE_OVERFLOW — ${activeDevices.length} devices on single license`,
+          message: `DEVICE_OVERFLOW â€” ${activeDevices.length} devices on single license`,
           metadata: { maxDevices: license.maxDevices, currentDevices: activeDevices.length },
         })
         await this.prisma.securityEvent.create({
@@ -398,7 +440,7 @@ export class PublicApiService {
             where: { id: autoDevice.id },
             data: { fingerprint, hash, name: deviceModel, model: deviceModel, lastIp: ip, lastSeenAt: new Date() },
           })
-          isNewDevice = false // web01.1: upgrade is NOT a new device — action must still be logged
+          isNewDevice = false // web01.1: upgrade is NOT a new device â€” action must still be logged
           // Delete all remaining auto_ for this license (upgraded device now has real fingerprint)
           setImmediate(() => this.prisma.device.deleteMany({
             where: { licenseId: license.id, fingerprint: { startsWith: 'auto_' } },
@@ -426,7 +468,7 @@ export class PublicApiService {
       await this.logActivity({
         type: 'DEVICE_REGISTERED', severity: 'LOW',
         licenseId: license.id, deviceId: deviceRecord.id, licenseKey: key, ip,
-        message: `New device registered — ${deviceModel}`,
+        message: `New device registered â€” ${deviceModel}`,
         metadata: { plugin: pluginName, action },
       })
     } else {
@@ -469,7 +511,7 @@ export class PublicApiService {
       }
     }
 
-    // Log action — always, even on first registration (web01.1 logs access + plugin usage separately)
+    // Log action â€” always, even on first registration (web01.1 logs access + plugin usage separately)
     await this.logActivity({
       type: this.actionToActivityType(action), severity: 'LOW',
       licenseId: license.id, deviceId: deviceRecord?.id, licenseKey: key, ip,
@@ -486,7 +528,7 @@ export class PublicApiService {
     // Async abuse checks
     setImmediate(() => this.runAbuseChecks(key, license.id, ip))
 
-    // Refresh IP bridge on every successful verify — stored in-memory + Redis (survives restarts)
+    // Refresh IP bridge on every successful verify â€” stored in-memory + Redis (survives restarts)
     if (ip) {
       this.setIPBridge(ip, key)
     }
@@ -503,9 +545,9 @@ export class PublicApiService {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Issue plugin session JWT
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async issuePluginSession(params: {
     key: string
@@ -530,15 +572,15 @@ export class PublicApiService {
 
     const token = this.jwt.sign(
       { type: 'plugin', license_key: params.key, device_id: params.fingerprint, plugin_name: this.safeDecodePlugin(params.pluginName) },
-      { secret: this.config.get('JWT_SECRET'), expiresIn: '90s' },
+      { secret: this.config.get('JWT_SECRET'), expiresIn: '300s' },
     )
 
-    return { ok: true, token, expiresIn: 90 }
+    return { ok: true, token, expiresIn: 300 }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Heartbeat
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async heartbeat(params: { key: string; fingerprint: string; ip: string }): Promise<VerifyResult> {
     if (!params.key || !params.fingerprint) {
@@ -566,9 +608,9 @@ export class PublicApiService {
     return { ok: true, daysLeft: this.calcDaysLeft(license.expiresAt) }
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Discover — find license key from device/IP/cookie
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Discover â€” find license key from device/IP/cookie
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async discoverLicense(params: { fingerprint: string; ip: string }): Promise<{ status: string; key?: string; expiresAt?: string }> {
     const { fingerprint, ip } = params
@@ -590,7 +632,7 @@ export class PublicApiService {
       }
     }
 
-    // Strategy 1: Look up device record by real fingerprint (no time limit — same as web01.1 Strategy 2)
+    // Strategy 1: Look up device record by real fingerprint (no time limit â€” same as web01.1 Strategy 2)
     if (fingerprint) {
       const devices = await this.prisma.device.findMany({
         where: { fingerprint },
@@ -605,7 +647,7 @@ export class PublicApiService {
       }
     }
 
-    // Strategy 1b: Auto IP-device lookup — present when user accessed repo/plugins from this IP
+    // Strategy 1b: Auto IP-device lookup â€” present when user accessed repo/plugins from this IP
     // (web01.1 equivalent: auto_ device registered on repo.json/plugins.json access)
     if (ip) {
       const autoFp = this.autoFingerprint(ip)
@@ -641,7 +683,7 @@ export class PublicApiService {
       }
     }
 
-    // Strategy 3: IPv4 subnet fallback (first 3 octets) — handles mobile CGNAT IP changes
+    // Strategy 3: IPv4 subnet fallback (first 3 octets) â€” handles mobile CGNAT IP changes
     if (ip && ip.includes('.')) {
       const subnet = ip.split('.').slice(0, 3).join('.')
       const subnetLog = await this.prisma.activityLog.findFirst({
@@ -684,9 +726,9 @@ export class PublicApiService {
     return { status: 'error' }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Repo serving
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async getRepoManifest(key: string, serverUrl: string, ip?: string): Promise<{ ok: boolean; data?: any; message?: string }> {
     const license = await this.prisma.license.findFirst({
@@ -694,7 +736,7 @@ export class PublicApiService {
     })
     if (!license) return { ok: false, message: 'License inactive or not found' }
 
-    // IP Bridge — in-memory + Redis + auto device (exactly like web01.1 repo.json)
+    // IP Bridge â€” in-memory + Redis + auto device (exactly like web01.1 repo.json)
     if (ip) {
       this.setIPBridge(ip, key)
       this.logger.log(`[REPO] IP bridge set: ${ip} -> ${key}`)
@@ -757,7 +799,7 @@ export class PublicApiService {
       }
     })
 
-    // Log per-plugin OPEN activity — like web01.1 trackPluginUsage(key, autoDeviceId, p.internalName, 'OPEN', ip)
+    // Log per-plugin OPEN activity â€” like web01.1 trackPluginUsage(key, autoDeviceId, p.internalName, 'OPEN', ip)
     if (ip) {
       setImmediate(async () => {
         const pluginNames = pluginList.map(p => p.name).join(', ')
@@ -782,9 +824,9 @@ export class PublicApiService {
     return { ok: true, plugins: pluginList }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Selectors / Secret keys
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   verifyPluginToken(token: string): { valid: boolean; payload?: any; error?: string } {
     try {
@@ -796,9 +838,9 @@ export class PublicApiService {
     }
   }
 
-  // Default selector config — used when plugin has no custom config in DB (web01.1 equivalent)
+  // Default selector config â€” used when plugin has no custom config in DB (web01.1 equivalent)
   private readonly DEFAULT_SELECTORS = {
-    server_selector: '.mobius option',
+    server_selector: '.mobius option, #server option, #player option, select option',
     value_attr: 'value',
     encoding: 'base64',
   }
@@ -813,10 +855,8 @@ export class PublicApiService {
       if (lic.expiresAt && lic.expiresAt < new Date()) return { ok: false, message: 'Lisensi telah kadaluarsa' }
     }
 
-    // Case-insensitive slug match
-    const plugin = await this.prisma.plugin.findFirst({
-      where: { slug: { equals: pluginName, mode: 'insensitive' } },
-    })
+    // Resolve plugin tolerantly (slug/name/metadata.internalName)
+    const plugin = await this.resolvePluginRecord(pluginName)
     if (!plugin?.metadata) return { ok: true, selectors: this.DEFAULT_SELECTORS }
 
     const meta = plugin.metadata as any
@@ -836,10 +876,8 @@ export class PublicApiService {
       if (lic.expiresAt && lic.expiresAt < new Date()) return { ok: false, message: 'Lisensi telah kadaluarsa' }
     }
 
-    // Case-insensitive slug match
-    const plugin = await this.prisma.plugin.findFirst({
-      where: { slug: { equals: pluginName, mode: 'insensitive' } },
-    })
+    // Resolve plugin tolerantly (slug/name/metadata.internalName)
+    const plugin = await this.resolvePluginRecord(pluginName)
     if (!plugin?.metadata) return { ok: false, message: 'Secret config not found' }
 
     const meta = plugin.metadata as any
@@ -855,9 +893,39 @@ export class PublicApiService {
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Helpers
-  // ──────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  private normalizeName(s: string): string {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  }
+
+  private async resolvePluginRecord(pluginName: string): Promise<{ id: string; slug: string; name: string; metadata: any } | null> {
+    // 1) Direct slug/name equals (case-insensitive)
+    const direct = await this.prisma.plugin.findFirst({
+      where: {
+        OR: [
+          { slug: { equals: pluginName, mode: 'insensitive' } },
+          { name: { equals: pluginName, mode: 'insensitive' } },
+        ],
+      },
+    })
+    if (direct) return direct as any
+
+    // 2) Tolerant match by normalized forms (remove emoji/punct)
+    const target = this.normalizeName(pluginName)
+    if (!target) return null
+    const all = await this.prisma.plugin.findMany({ select: { id: true, slug: true, name: true, metadata: true } })
+    for (const p of all) {
+      const s1 = this.normalizeName(p.slug)
+      const s2 = this.normalizeName(p.name)
+      const s3 = this.normalizeName((p.metadata as any)?.internalName ?? '')
+      if (target === s1 || target === s2 || (s3 && target === s3)) return p as any
+    }
+    const loose = all.find(p => this.normalizeName(p.name).includes(target) || this.normalizeName(p.slug).includes(target))
+    return (loose as any) ?? null
+  }
 
   async resolvePluginFileUrl(slug: string, filename: string): Promise<string> {
     const plugin = await this.prisma.plugin.findFirst({
@@ -891,18 +959,18 @@ export class PublicApiService {
   private buildSuccessMessage(action: string, pluginName: string, data: string): string {
     const act = action?.toUpperCase() ?? ''
     const pn = pluginName || 'unknown'
-    if (act === 'PLAY' && data) return `Playing: ${data.substring(0, 80)} — ${pn}`
-    if (act === 'PLAY') return `Playback started — ${pn}`
-    if (act === 'HOME') return `Home loaded — ${pn}`
-    if (act === 'OPEN') return `Plugin opened — ${pn}`
-    if (act === 'SEARCH') return `Search — ${pn}`
-    if (act === 'DETAIL') return `Detail page — ${pn}`
-    if (act === 'SELECTORS') return `Selector config loaded — ${pn}`
-    if (act === 'SESSION') return `Session issued — ${pn}`
-    return `${act} — ${pn}`
+    if (act === 'PLAY' && data) return `Playing: ${data.substring(0, 80)} â€” ${pn}`
+    if (act === 'PLAY') return `Playback started â€” ${pn}`
+    if (act === 'HOME') return `Home loaded â€” ${pn}`
+    if (act === 'OPEN') return `Plugin opened â€” ${pn}`
+    if (act === 'SEARCH') return `Search â€” ${pn}`
+    if (act === 'DETAIL') return `Detail page â€” ${pn}`
+    if (act === 'SELECTORS') return `Selector config loaded â€” ${pn}`
+    if (act === 'SESSION') return `Session issued â€” ${pn}`
+    return `${act} â€” ${pn}`
   }
 
-  // Upgrade all auto_ placeholder devices for this IP to real device — matches web01.1 upgradeAutoDevicesForIP
+  // Upgrade all auto_ placeholder devices for this IP to real device â€” matches web01.1 upgradeAutoDevicesForIP
   private async upgradeAutoDevicesForIP(ip: string, realFingerprint: string, deviceModel: string): Promise<void> {
     try {
       const autoFp = this.autoFingerprint(ip)
@@ -939,5 +1007,78 @@ export class PublicApiService {
   private extractAppVersion(ua: string): string | undefined {
     const m = ua.match(/CloudStreamApp\/([^ ]+)/i)
     return m ? m[1] : undefined
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Admin plugin management
+  // ─────────────────────────────────────────────────────────────
+
+  async upsertPlugin(data: {
+    slug: string
+    name: string
+    description: string
+    version: string
+    category: string
+    fileUrl: string
+    size: number
+    iconUrl: string
+    metadata: any
+  }) {
+    return this.prisma.plugin.upsert({
+      where: { slug: data.slug },
+      create: {
+        id: crypto.randomUUID(),
+        slug: data.slug,
+        name: data.name,
+        description: data.description,
+        version: data.version,
+        category: data.category,
+        fileUrl: data.fileUrl,
+        size: data.size,
+        iconUrl: data.iconUrl,
+        metadata: data.metadata,
+        isEnabled: true,
+        isFeatured: false,
+        downloadCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      update: {
+        fileUrl: data.fileUrl,
+        size: data.size,
+        version: data.version,
+        metadata: data.metadata,
+        updatedAt: new Date(),
+      },
+    })
+  }
+
+  async listAllPlugins() {
+    return this.prisma.plugin.findMany({
+      orderBy: { name: 'asc' },
+    })
+  }
+
+  async deletePlugin(slug: string) {
+    const plugin = await this.prisma.plugin.findUnique({ where: { slug } })
+    if (!plugin) throw new Error('Plugin not found')
+
+    // Delete file from disk
+    if (plugin.fileUrl) {
+      const filename = plugin.fileUrl.split('/').pop()
+      if (filename) {
+        const filePath = `/var/www/html/apk-uploads/${filename}`
+        try {
+          const fs = await import('fs')
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath)
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to delete file: ${filePath}`)
+        }
+      }
+    }
+
+    await this.prisma.plugin.delete({ where: { slug } })
   }
 }

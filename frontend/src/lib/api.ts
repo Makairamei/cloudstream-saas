@@ -183,6 +183,7 @@ export const endpoints = {
     plugins:        '/analytics/plugins',
     hourly:         '/analytics/hourly',
     geo:            '/analytics/geo',
+    topActive:      '/analytics/top-active',
     activity:       '/analytics/activity',
     security:       '/analytics/security',
   },

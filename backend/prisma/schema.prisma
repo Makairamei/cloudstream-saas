@@ -1,5 +1,5 @@
-// CloudStream SaaS — Prisma Schema
-// ─────────────────────────────────────
+// CloudStream SaaS â€” Prisma Schema
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 generator client {
   provider = "prisma-client-js"
@@ -10,7 +10,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── Enums ──────────────────────────────────────────────────
+// â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 enum Role {
   SUPER_ADMIN
@@ -91,7 +91,7 @@ enum AdminAction {
   UPDATE_ROLE
 }
 
-// ── Models ─────────────────────────────────────────────────
+// â”€â”€ Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Admin {
   id                String       @id @default(cuid())
@@ -199,6 +199,7 @@ model Device {
   blockedAt       DateTime?
   blockedReason   String?
   isVpn           Boolean      @default(false)
+  deletedAt       DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -209,6 +210,7 @@ model Device {
   @@index([licenseId])
   @@index([status])
   @@index([fingerprint])
+  @@index([deletedAt])
   @@map("devices")
 }
 
@@ -295,6 +297,7 @@ model ActivityLog {
   country     String?
   message     String
   metadata    Json?
+  deletedAt   DateTime?
   createdAt   DateTime     @default(now())
 
   @@index([type])
@@ -304,6 +307,7 @@ model ActivityLog {
   @@index([severity])
   @@index([ip])
   @@index([licenseKey])
+  @@index([deletedAt])
   @@map("activity_logs")
 }
 
@@ -320,11 +324,13 @@ model PlaybackLog {
   duration    Int?
   ip          String?
   country     String?
+  deletedAt   DateTime?
   createdAt   DateTime @default(now())
 
   @@index([licenseId])
   @@index([pluginSlug])
   @@index([createdAt])
+  @@index([deletedAt])
   @@map("playback_logs")
 }
 

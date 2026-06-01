@@ -1,18 +1,26 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common'
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { PrismaService } from '../prisma/prisma.service'
 import { CreateLicenseDto } from './dto/create-license.dto'
 import { UpdateLicenseDto } from './dto/update-license.dto'
 import { ListLicensesDto } from './dto/list-licenses.dto'
 import { nanoid } from 'nanoid'
+import { SettingsService } from '../settings/settings.service'
 
 @Injectable()
 export class LicensesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private settings: SettingsService,
+  ) {}
 
   async findAll(dto: ListLicensesDto) {
+    const onlyDeleted    = (dto as any).deleted === true || (dto as any).deleted === 'true'
     const includeDeleted = (dto as any).includeDeleted === true || (dto as any).includeDeleted === 'true'
-    const where: any = includeDeleted ? {} : { deletedAt: null }
-    if (dto.status) where.status = dto.status
+    const where: any = onlyDeleted
+      ? { deletedAt: { not: null } }
+      : (includeDeleted ? {} : { deletedAt: null })
+    if (dto.status) where.status = dto.status as any
     if (dto.search) {
       where.OR = [
         { key: { contains: dto.search, mode: 'insensitive' } },
@@ -22,16 +30,17 @@ export class LicensesService {
     }
     if (dto.tag) where.tags = { has: dto.tag }
 
-    const [total, items] = await Promise.all([
+    const [total, raw] = await Promise.all([
       this.prisma.license.count({ where }),
       this.prisma.license.findMany({
         where,
-        include: { _count: { select: { devices: true } } },
+        include: { _count: { select: { devices: { where: { deletedAt: null } } } } },
         orderBy: { [dto.sortBy || 'createdAt']: dto.order || 'desc' },
         skip: ((dto.page || 1) - 1) * (dto.limit || 20),
         take: dto.limit || 20,
       }),
     ])
+    const items = raw.map(l => ({ ...l, activeDevices: l._count?.devices ?? 0 }))
 
     return { total, items, page: dto.page || 1, limit: dto.limit || 20 }
   }
@@ -49,10 +58,25 @@ export class LicensesService {
   }
 
   async create(dto: CreateLicenseDto, adminId: string) {
-    const key = dto.key || this.generateKey(dto.isTrial)
+    const key = dto.key || (await this.generateKey(dto.isTrial))
 
     const existing = await this.prisma.license.findUnique({ where: { key } })
     if (existing) throw new ConflictException('License key already exists')
+
+    // Pull configurable defaults from settings table
+    const defaultMaxDevices = await this.settings.getValue<number>('default_max_devices', 2)
+    const defaultGrace = await this.settings.getValue<number>('default_grace_period_days', 7)
+    const defaultDuration = await this.settings.getValue<number>('default_duration_days', 30)
+    const defaultTrialDays = await this.settings.getValue<number>('default_trial_days', 7)
+
+    let expiresAt: Date | null = null
+    if (dto.expiresAt) {
+      expiresAt = new Date(dto.expiresAt)
+    } else if (dto.isTrial) {
+      expiresAt = new Date(Date.now() + defaultTrialDays * 86_400_000)
+    } else if (defaultDuration > 0) {
+      expiresAt = new Date(Date.now() + defaultDuration * 86_400_000)
+    }
 
     const license = await this.prisma.license.create({
       data: {
@@ -60,10 +84,10 @@ export class LicensesService {
         name: dto.name,
         email: dto.email,
         status: dto.isTrial ? 'TRIAL' : 'ACTIVE',
-        maxDevices: dto.maxDevices || 3,
-        gracePeriodDays: dto.gracePeriodDays || 7,
+        maxDevices: dto.maxDevices ?? defaultMaxDevices,
+        gracePeriodDays: dto.gracePeriodDays ?? defaultGrace,
         isTrial: dto.isTrial || false,
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+        expiresAt,
         allowedPlugins: dto.allowedPlugins || [],
         tags: dto.tags || [],
         notes: dto.notes,
@@ -119,11 +143,36 @@ export class LicensesService {
   }
 
   async restore(id: string, adminId: string) {
-    // Find regardless of deletedAt — restore must work even for soft-deleted licenses
     const license = await this.prisma.license.findFirst({
       where: { OR: [{ id }, { key: id }] },
     })
     if (!license) throw new NotFoundException('License not found')
+
+    // If license was soft-deleted, restore all child rows that were soft-deleted
+    // at the SAME timestamp (cascade group). Tolerate small clock skew (Ã‚Â±2s).
+    let cascadedCounts = { devices: 0, activityLogs: 0, playbackLogs: 0 }
+
+    if (license.deletedAt) {
+      const t = license.deletedAt
+      const lo = new Date(t.getTime() - 2000)
+      const hi = new Date(t.getTime() + 2000)
+
+      const [devRes, actRes, playRes] = await this.prisma.$transaction([
+        this.prisma.device.updateMany({
+          where: { licenseId: license.id, deletedAt: { gte: lo, lte: hi } },
+          data: { deletedAt: null },
+        }),
+        this.prisma.activityLog.updateMany({
+          where: { licenseId: license.id, deletedAt: { gte: lo, lte: hi } },
+          data: { deletedAt: null },
+        }),
+        this.prisma.playbackLog.updateMany({
+          where: { licenseId: license.id, deletedAt: { gte: lo, lte: hi } },
+          data: { deletedAt: null },
+        }),
+      ])
+      cascadedCounts = { devices: devRes.count, activityLogs: actRes.count, playbackLogs: playRes.count }
+    }
 
     const updated = await this.prisma.license.update({
       where: { id: license.id },
@@ -131,10 +180,10 @@ export class LicensesService {
     })
 
     await this.prisma.adminLog.create({
-      data: { adminId, action: 'RESTORE_LICENSE', target: license.key, targetType: 'LICENSE' },
+      data: { adminId, action: 'RESTORE_LICENSE', target: license.key, targetType: 'LICENSE', details: cascadedCounts as any },
     })
 
-    return updated
+    return { ...updated, restored: cascadedCounts }
   }
 
   async activate(id: string, adminId: string) {
@@ -190,14 +239,31 @@ export class LicensesService {
 
   async remove(id: string, adminId: string) {
     const license = await this.findOne(id)
+    const now = new Date()
 
-    await this.prisma.license.update({
-      where: { id: license.id },
-      data: { deletedAt: new Date(), status: 'REVOKED' },
-    })
+    // Cascade soft delete: license + all related records get the same timestamp
+    // so they restore together as a coherent group later.
+    await this.prisma.$transaction([
+      this.prisma.license.update({
+        where: { id: license.id },
+        data: { deletedAt: now, status: 'REVOKED' },
+      }),
+      this.prisma.device.updateMany({
+        where: { licenseId: license.id, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+      this.prisma.activityLog.updateMany({
+        where: { licenseId: license.id, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+      this.prisma.playbackLog.updateMany({
+        where: { licenseId: license.id, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+    ])
 
     await this.prisma.adminLog.create({
-      data: { adminId, action: 'DELETE_LICENSE', target: license.key, targetType: 'LICENSE' },
+      data: { adminId, action: 'DELETE_LICENSE', target: license.key, targetType: 'LICENSE', details: { softDelete: true, restorableUntil: new Date(now.getTime() + 7 * 86400000).toISOString() } as any },
     })
   }
 
@@ -231,7 +297,7 @@ export class LicensesService {
           licenseId: license.id,
           licenseKey: key,
           ip,
-          message: `DEVICE_OVERFLOW — ${activeDevices} devices on single license`,
+          message: `DEVICE_OVERFLOW Ã¢â‚¬â€ ${activeDevices} devices on single license`,
         },
       })
       return { valid: false, reason: 'DEVICE_LIMIT_EXCEEDED' }
@@ -253,9 +319,67 @@ export class LicensesService {
     return { valid: true, license: { key, status: license.status, expiresAt: license.expiresAt, maxDevices: license.maxDevices } }
   }
 
-  private generateKey(isTrial = false): string {
-    const prefix = isTrial ? 'CS-TRIAL' : 'CS-PROD'
-    const id = nanoid(8).toUpperCase().replace(/[^A-Z0-9]/g, '0')
-    return `${prefix}-${id}`
+  // Recycle bin: list deleted licenses with countdown
+  async recycleBin(dto: ListLicensesDto) {
+    const list = await this.findAll({ ...dto, deleted: true } as any)
+    const sevenDayMs = 7 * 86400000
+    const now = Date.now()
+    const items = (list.items as any[]).map(l => {
+      const deletedAt = l.deletedAt ? new Date(l.deletedAt).getTime() : 0
+      const purgeAt = deletedAt + sevenDayMs
+      return {
+        ...l,
+        purgeAt: new Date(purgeAt).toISOString(),
+        daysLeft: Math.max(0, Math.ceil((purgeAt - now) / 86400000)),
+        hoursLeft: Math.max(0, Math.ceil((purgeAt - now) / 3600000)),
+      }
+    })
+    return { ...list, items }
+  }
+
+  // Cascade purge: hard-delete licenses + related rows that were soft-deleted >= 7 days ago.
+  // Cron runs every 6 hours.
+  @Cron(CronExpression.EVERY_6_HOURS)
+  async purgeExpired() {
+    const cutoff = new Date(Date.now() - 7 * 86400000)
+    const expired = await this.prisma.license.findMany({
+      where: { deletedAt: { lte: cutoff } },
+      select: { id: true, key: true, deletedAt: true },
+    })
+    if (expired.length === 0) return { purged: 0 }
+    const ids = expired.map(l => l.id)
+    const keys = expired.map(l => l.key)
+    await this.prisma.$transaction([
+      this.prisma.activityLog.deleteMany({ where: { licenseId: { in: ids } } }),
+      this.prisma.playbackLog.deleteMany({ where: { licenseId: { in: ids } } }),
+      this.prisma.device.deleteMany({ where: { licenseId: { in: ids } } }),
+      this.prisma.securityEvent.deleteMany({ where: { licenseKey: { in: keys } } }),
+      this.prisma.license.deleteMany({ where: { id: { in: ids } } }),
+    ])
+    return { purged: expired.length, keys: expired.map(l => l.key) }
+  }
+
+  // Manually purge a single soft-deleted license immediately (admin override)
+  async hardDelete(id: string, adminId: string) {
+    const license = await this.prisma.license.findFirst({ where: { OR: [{ id }, { key: id }] } })
+    if (!license) throw new NotFoundException('License not found')
+    await this.prisma.$transaction([
+      this.prisma.activityLog.deleteMany({ where: { licenseId: license.id } }),
+      this.prisma.playbackLog.deleteMany({ where: { licenseId: license.id } }),
+      this.prisma.device.deleteMany({ where: { licenseId: license.id } }),
+      this.prisma.securityEvent.deleteMany({ where: { licenseKey: license.key } }),
+      this.prisma.license.delete({ where: { id: license.id } }),
+    ])
+    await this.prisma.adminLog.create({
+      data: { adminId, action: 'DELETE_LICENSE', target: license.key, targetType: 'LICENSE', details: { hardDelete: true } as any },
+    })
+    return { ok: true, key: license.key }
+  }
+
+  private async generateKey(isTrial = false): Promise<string> {
+    const customPrefix = await this.settings.getValue<string>('license_key_prefix', 'CS-PROD')
+    const prefix = isTrial ? 'CS-TRIAL' : customPrefix
+    const id = nanoid(10).toUpperCase().replace(/[^A-Z0-9]/g, '0')
+    return `-${id}`
   }
 }

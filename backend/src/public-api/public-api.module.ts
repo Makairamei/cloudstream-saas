@@ -11,7 +11,7 @@ import { WebsocketModule } from '../websocket/websocket.module'
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get('JWT_SECRET'),
-        signOptions: { expiresIn: '90s' },
+        signOptions: { expiresIn: '300s' },
       }),
     }),
     WebsocketModule,

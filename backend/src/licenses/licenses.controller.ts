@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller, Get, Post, Put, Patch, Delete, Body, Param,
   Query, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common'
@@ -20,6 +20,17 @@ export class LicensesController {
   @Get()
   findAll(@Query() dto: ListLicensesDto) {
     return this.service.findAll(dto)
+  }
+
+  @Get('recycle-bin')
+  recycleBin(@Query() dto: ListLicensesDto) {
+    return this.service.recycleBin(dto)
+  }
+
+  @Delete(':id/hard')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  hardDelete(@Param('id') id: string, @CurrentAdmin() admin: any) {
+    return this.service.hardDelete(id, admin.id)
   }
 
   @Get(':id')

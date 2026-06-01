@@ -1,11 +1,17 @@
 import {
   Controller, Get, Post, Body, Param, Query, Req, Res,
-  Headers, HttpCode, HttpStatus, Logger,
+  Headers, HttpCode, HttpStatus, Logger, UseInterceptors,
+  UploadedFile, UseGuards,
 } from '@nestjs/common'
 import { Request, Response } from 'express'
 import { PublicApiService } from './public-api.service'
 import * as https from 'https'
 import * as http from 'http'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { diskStorage } from 'multer'
+import { extname } from 'path'
+import * as fs from 'fs'
+import * as crypto from 'crypto'
 
 // ─────────────────────────────────────────────────────────────
 // Helper: extract real client IP from forwarded headers
@@ -187,7 +193,9 @@ export class PublicApiController {
     // Enforce JWT plugin_name binding — token for plugin A cannot get selectors for plugin B
     const requestedPlugin = (body.plugin_name ?? '').trim()
     const tokenPlugin = (payload.plugin_name ?? '').trim()
-    if (requestedPlugin && tokenPlugin && requestedPlugin.toLowerCase() !== tokenPlugin.toLowerCase()) {
+    const normRequested = requestedPlugin.replace(/[^\x00-\x7F]/g, '').trim().toLowerCase()
+    const normToken = tokenPlugin.replace(/[^\x00-\x7F]/g, '').trim().toLowerCase()
+    if (requestedPlugin && tokenPlugin && normRequested !== normToken) {
       return { status: 'error', message: 'Session token tidak cocok dengan plugin yang diminta' }
     }
     const pluginName = tokenPlugin || requestedPlugin
@@ -323,5 +331,120 @@ export class PublicApiController {
     @Res() res: Response,
   ) {
     return this.servePlugin(key, filename, req, res)
+  }
+
+  // ── Admin: Upload plugin .cs3 file ─────────────────────────
+
+  @Post('api/admin/plugins/upload')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: '/var/www/html/apk-uploads',
+      filename: (req, file, cb) => {
+        const timestamp = Date.now()
+        const randomSuffix = crypto.randomBytes(4).toString('hex')
+        const filename = `${timestamp}_${randomSuffix}${extname(file.originalname)}`
+        cb(null, filename)
+      }
+    }),
+    fileFilter: (req, file, cb) => {
+      if (!file.originalname.match(/\.cs3$/i)) {
+        return cb(new Error('Only .cs3 files are allowed'), false)
+      }
+      cb(null, true)
+    },
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+  }))
+  async uploadPlugin(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+    @Req() req: Request,
+  ) {
+    if (!file) {
+      return { status: 'error', message: 'No file uploaded' }
+    }
+
+    const internalName = (body.internalName || '').trim()
+    const name = (body.name || internalName || '').trim()
+    const description = (body.description || '').trim()
+    const authors = body.authors ? (Array.isArray(body.authors) ? body.authors : [body.authors]) : []
+    const version = parseInt(body.version) || 1
+    const iconUrl = (body.iconUrl || '').trim()
+    const language = (body.language || 'id').trim()
+    const tvTypes = body.tvTypes ? (Array.isArray(body.tvTypes) ? body.tvTypes : [body.tvTypes]) : []
+    const category = (body.category || 'other').trim()
+
+    if (!internalName) {
+      fs.unlinkSync(file.path)
+      return { status: 'error', message: 'internalName is required' }
+    }
+
+    const fileUrl = `${process.env.SERVER_URL || 'https://faxecez.eu.org'}/apk/${file.filename}`
+    const fileSize = file.size
+
+    try {
+      await this.service.upsertPlugin({
+        slug: internalName.toLowerCase(),
+        name: name || internalName,
+        description,
+        version: version.toString(),
+        category,
+        fileUrl,
+        size: fileSize,
+        iconUrl,
+        metadata: {
+          internalName,
+          authors,
+          language,
+          tvTypes,
+          csStatus: 1,
+        },
+      })
+
+      this.logger.log(`Plugin uploaded: ${internalName} by ${clientIp(req)}`)
+      return {
+        status: 'ok',
+        message: 'Plugin uploaded successfully',
+        plugin: {
+          internalName,
+          name,
+          version,
+          fileUrl,
+          fileSize,
+        }
+      }
+    } catch (error) {
+      fs.unlinkSync(file.path)
+      this.logger.error(`Plugin upload failed: ${error}`)
+      return { status: 'error', message: 'Upload failed: ' + (error as any).message }
+    }
+  }
+
+  // ── Admin: List all plugins ─────────────────────────────────
+
+  @Get('api/admin/plugins')
+  async listPlugins(@Req() req: Request) {
+    try {
+      const plugins = await this.service.listAllPlugins()
+      return { status: 'ok', plugins }
+    } catch (error) {
+      return { status: 'error', message: (error as any).message }
+    }
+  }
+
+  // ── Admin: Delete plugin ─────────────────────────────────────
+
+  @Post('api/admin/plugins/delete')
+  async deletePlugin(@Body() body: any) {
+    const slug = (body.slug || '').trim()
+    if (!slug) {
+      return { status: 'error', message: 'slug is required' }
+    }
+
+    try {
+      await this.service.deletePlugin(slug)
+      return { status: 'ok', message: 'Plugin deleted' }
+    } catch (error) {
+      return { status: 'error', message: (error as any).message }
+    }
   }
 }

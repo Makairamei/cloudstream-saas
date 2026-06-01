@@ -99,6 +99,22 @@ export default function PluginsPage() {
   const [clearing, setClearing] = useState(false)
   const [actionResult, setActionResult] = useState<SyncResult | null>(null)
 
+  // Upload panel
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadForm, setUploadForm] = useState({
+    internalName: '',
+    name: '',
+    description: '',
+    authors: '',
+    version: '1',
+    iconUrl: '',
+    language: 'id',
+    tvTypes: '',
+    category: 'other',
+  })
+
   useEffect(() => {
     const s = localStorage.getItem('cs_last_sync')
     if (s) setLastSyncAt(s)
@@ -272,6 +288,48 @@ export default function PluginsPage() {
     toast.success(`${adultPlugins.length} plugin 18+ dinonaktifkan`)
   }
 
+  const handleUpload = async () => {
+    if (!uploadFile) { toast.error('Pilih file .cs3 terlebih dahulu'); return }
+    if (!uploadForm.internalName) { toast.error('Internal Name wajib diisi'); return }
+
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('file', uploadFile)
+    formData.append('internalName', uploadForm.internalName)
+    formData.append('name', uploadForm.name || uploadForm.internalName)
+    formData.append('description', uploadForm.description)
+    formData.append('authors', uploadForm.authors)
+    formData.append('version', uploadForm.version)
+    formData.append('iconUrl', uploadForm.iconUrl)
+    formData.append('language', uploadForm.language)
+    formData.append('tvTypes', uploadForm.tvTypes)
+    formData.append('category', uploadForm.category)
+
+    try {
+      const res = await fetch('/api/admin/plugins/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (data.status === 'ok') {
+        toast.success(`Plugin "${data.plugin.name}" berhasil diupload`)
+        setShowUpload(false)
+        setUploadFile(null)
+        setUploadForm({
+          internalName: '', name: '', description: '', authors: '',
+          version: '1', iconUrl: '', language: 'id', tvTypes: '', category: 'other',
+        })
+        fetchPlugins()
+      } else {
+        toast.error(data.message || 'Upload gagal')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Upload gagal')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const normalPlugins = useMemo(() => filtered.filter(p => !isAdult(p)), [filtered])
   const adultPlugins  = useMemo(() => filtered.filter(p =>  isAdult(p)), [filtered])
   const displayList   = useMemo(() => groupAdult ? [...normalPlugins, ...adultPlugins] : filtered, [groupAdult, normalPlugins, adultPlugins, filtered])
@@ -427,6 +485,143 @@ export default function PluginsPage() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ── Upload Panel ── */}
+      <div className="card overflow-hidden">
+        <button onClick={() => setShowUpload(!showUpload)}
+          className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+              <FileDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Upload Plugin .cs3</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-200 dark:border-emerald-500/30">Manual</span>
+          </div>
+          <ChevronDown className={cn('w-4 h-4 text-slate-400 transition-transform duration-200', showUpload && 'rotate-180')} />
+        </button>
+
+        <AnimatePresence initial={false}>
+          {showUpload && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
+              className="overflow-hidden border-t border-slate-100 dark:border-white/[0.06]">
+              <div className="px-5 py-4 space-y-4">
+                {/* File upload */}
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".cs3"
+                    onChange={e => setUploadFile(e.target.files?.[0] || null)}
+                    className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-500/20 dark:file:text-indigo-400 dark:hover:file:bg-indigo-500/30"
+                  />
+                  {uploadFile && (
+                    <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)
+                    </div>
+                  )}
+                </div>
+
+                {/* Form fields */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Internal Name *</label>
+                    <input
+                      value={uploadForm.internalName}
+                      onChange={e => setUploadForm({ ...uploadForm, internalName: e.target.value })}
+                      placeholder="AnichinMoe"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Nama Plugin</label>
+                    <input
+                      value={uploadForm.name}
+                      onChange={e => setUploadForm({ ...uploadForm, name: e.target.value })}
+                      placeholder="Anichin Moe"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Versi</label>
+                    <input
+                      value={uploadForm.version}
+                      onChange={e => setUploadForm({ ...uploadForm, version: e.target.value })}
+                      placeholder="1"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Category</label>
+                    <select
+                      value={uploadForm.category}
+                      onChange={e => setUploadForm({ ...uploadForm, category: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    >
+                      <option value="other">Other</option>
+                      <option value="anime">Anime</option>
+                      <option value="movie">Movie</option>
+                      <option value="series">Series</option>
+                      <option value="nsfw">NSFW</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Description</label>
+                    <input
+                      value={uploadForm.description}
+                      onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })}
+                      placeholder="Deskripsi plugin..."
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Authors (comma separated)</label>
+                    <input
+                      value={uploadForm.authors}
+                      onChange={e => setUploadForm({ ...uploadForm, authors: e.target.value })}
+                      placeholder="Author1, Author2"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Language</label>
+                    <input
+                      value={uploadForm.language}
+                      onChange={e => setUploadForm({ ...uploadForm, language: e.target.value })}
+                      placeholder="id"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">TV Types (comma separated)</label>
+                    <input
+                      value={uploadForm.tvTypes}
+                      onChange={e => setUploadForm({ ...uploadForm, tvTypes: e.target.value })}
+                      placeholder="AnimeMovie, Anime, Cartoon"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Icon URL</label>
+                    <input
+                      value={uploadForm.iconUrl}
+                      onChange={e => setUploadForm({ ...uploadForm, iconUrl: e.target.value })}
+                      placeholder="https://example.com/icon.png"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25"
+                    />
+                  </div>
+                </div>
+
+                {/* Upload button */}
+                <button onClick={handleUpload} disabled={uploading || !uploadFile}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-sm shadow-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                  {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+                  Upload Plugin
+                </button>
               </div>
             </motion.div>
           )}
