@@ -1,0 +1,1 @@
+﻿UPDATE plugins SET metadata = COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('selectors', jsonb_build_object('type','dom_selector','server_selector','.mobius option, #server option, #player option, #mirror option, select[name*=server] option, .server option, .serverlist option, select option','value_attr','value','encoding','base64'));

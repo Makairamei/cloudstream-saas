@@ -19,6 +19,12 @@ export class PluginsService {
   }
 
   private async downloadCs3ToVps(sourceUrl: string, internalName: string): Promise<{ vpsUrl: string; size: number; filename: string }> {
+    // Fast path: allow disabling mirroring to avoid timeouts on large imports
+    const disableMirror = String(process.env.DISABLE_PLUGIN_MIRROR ?? 'true').toLowerCase() === 'true'
+    if (disableMirror) {
+      const filename = path.basename(sourceUrl.split('?')[0] || 'plugin.cs3')
+      return { vpsUrl: sourceUrl, size: 0, filename }
+    }
     const uploadDir = process.env.APK_UPLOAD_DIR || '/var/www/html/apk-uploads'
     try { await fs.promises.mkdir(uploadDir, { recursive: true }) } catch {}
     const ts = Date.now()
