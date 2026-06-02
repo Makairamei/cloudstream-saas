@@ -235,7 +235,9 @@ export class PublicApiController {
   @Get('r/:key/repo.json')
   async repoJson(@Param('key') key: string, @Req() req: Request, @Res() res: Response) {
     const serverUrl = getServerUrl(req)
-    const result = await this.service.getRepoManifest(key, serverUrl, clientIp(req))
+    const ua = req.headers['user-agent'] ?? ''
+    const ip = isBot(ua) ? undefined : clientIp(req)
+    const result = await this.service.getRepoManifest(key, serverUrl, ip)
     if (!result.ok) return res.status(403).json({ status: 'error', message: result.message })
     return res.json(result.data)
   }
@@ -266,7 +268,9 @@ export class PublicApiController {
   @Get('r/:key/plugins.json')
   async pluginsJson(@Param('key') key: string, @Req() req: Request, @Res() res: Response) {
     const serverUrl = getServerUrl(req)
-    const result = await this.service.getPluginsList(key, serverUrl, clientIp(req))
+    const ua = req.headers['user-agent'] ?? ''
+    const ip = isBot(ua) ? undefined : clientIp(req)
+    const result = await this.service.getPluginsList(key, serverUrl, ip)
     if (!result.ok) return res.status(403).json({ status: 'error', message: result.message })
     return res.json(result.plugins)
   }
@@ -305,6 +309,9 @@ export class PublicApiController {
     // Resolve download URL: use fileUrl from DB if available, fallback to GitHub
     const slug = safeFilename.replace(/\.cs3$/i, '')
     const pluginFileUrl = await this.service.resolvePluginFileUrl(slug, safeFilename)
+
+    // Track plugin download activity asynchronously
+    this.service.trackDownload(key, slug, clientIp(req)).catch(() => {})
 
     this.logger.log(`Serving plugin: ${safeFilename} for key ${key} -> ${pluginFileUrl}`)
 

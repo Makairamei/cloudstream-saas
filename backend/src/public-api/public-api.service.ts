@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, Inject } from '@nestjs/common'
+import { Injectable, Logger, Inject } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
@@ -494,18 +494,21 @@ export class PublicApiService {
     }
 
     // Track plugin usage
+    const resolvedPlugin = pluginName ? await this.resolvePluginRecord(pluginName) : null
+    const canonicalPluginSlug = resolvedPlugin?.slug || pluginName || 'unknown'
+    const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
+
     if (pluginName && action) {
-      const pluginId = await this.resolvePluginId(pluginName)
-      if (pluginId) {
+      if (resolvedPlugin) {
         await this.prisma.pluginUsageLog.create({
-          data: { pluginId, licenseKey: key, action, ip },
+          data: { pluginId: resolvedPlugin.id, licenseKey: key, action, ip },
         }).catch(() => {})
       }
 
       // Increment plugin download/use count
-      if (['PLAY', 'OPEN', 'HOME'].includes(action.toUpperCase())) {
-        await this.prisma.plugin.updateMany({
-          where: { slug: { equals: pluginName, mode: 'insensitive' } },
+      if (['PLAY', 'OPEN', 'HOME'].includes(action.toUpperCase()) && resolvedPlugin) {
+        await this.prisma.plugin.update({
+          where: { id: resolvedPlugin.id },
           data: { downloadCount: { increment: 1 } },
         }).catch(() => {})
       }
@@ -515,11 +518,31 @@ export class PublicApiService {
     await this.logActivity({
       type: this.actionToActivityType(action), severity: 'LOW',
       licenseId: license.id, deviceId: deviceRecord?.id, licenseKey: key, ip,
-      message: this.buildSuccessMessage(action, pluginName, params.data),
-      metadata: { plugin: pluginName, action },
+      message: this.buildSuccessMessage(action, canonicalPluginName, params.data),
+      metadata: { plugin: canonicalPluginSlug, action },
     })
 
-    // Update license counters
+    // Record to PlaybackLog whenever user plays or downloads content
+    if (['PLAY', 'DOWNLOAD'].includes(action?.toUpperCase())) {
+      setImmediate(() => this.prisma.playbackLog.create({
+        data: {
+          licenseId: license.id,
+          deviceId: deviceRecord?.id ?? null,
+          licenseKey: key,
+          pluginSlug: canonicalPluginSlug,
+          videoTitle: params.data ? this.cleanUrlToTitle(params.data).substring(0, 255) : null,
+          videoUrl: params.data ? params.data.substring(0, 500) : null,
+          ip,
+        },
+      }).then(() =>
+        this.prisma.license.update({
+          where: { id: license.id },
+          data: { playbackCount: { increment: 1 } },
+        }).catch(() => {})
+      ).catch(() => {}))
+    }
+
+
     await this.prisma.license.update({
       where: { id: license.id },
       data: { verifyCount: { increment: 1 }, lastVerifiedAt: new Date() },
@@ -952,22 +975,68 @@ export class PublicApiService {
       SESSION: 'PLUGIN_SESSION',
       SELECTORS: 'SELECTORS_OK',
       VERIFY: 'VERIFY_OK',
+      SEARCH: 'VERIFY_OK',
+      LOAD: 'VERIFY_OK',
     }
     return map[action?.toUpperCase()] ?? 'VERIFY_OK'
+  }
+
+  private cleanUrlToTitle(urlStr: string): string {
+    if (!urlStr) return ''
+    const trimmed = urlStr.trim()
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return trimmed
+    }
+    try {
+      const parsed = new URL(trimmed)
+      let pathName = parsed.pathname
+      if (pathName.endsWith('/')) {
+        pathName = pathName.slice(0, -1)
+      }
+      const lastPart = pathName.split('/').pop() || ''
+      if (!lastPart) return trimmed
+
+      // Replace hyphens, underscores and dots with spaces
+      let clean = lastPart
+        .replace(/[-_.]+/g, ' ')
+        .trim()
+
+      // Convert to Title Case and clean common keywords
+      clean = clean
+        .split(' ')
+        .map(word => {
+          const l = word.toLowerCase()
+          if (l === 'indo' || l === 'indonesia') return 'Sub Indo'
+          if (l === 'sub') return ''
+          if (l === 'eps') return 'Episode'
+          if (l === 'episode') return 'Episode'
+          return word.charAt(0).toUpperCase() + word.slice(1)
+        })
+        .filter(Boolean)
+        .join(' ')
+
+      return clean || trimmed
+    } catch (e) {
+      return trimmed
+    }
   }
 
   private buildSuccessMessage(action: string, pluginName: string, data: string): string {
     const act = action?.toUpperCase() ?? ''
     const pn = pluginName || 'unknown'
-    if (act === 'PLAY' && data) return `Playing: ${data.substring(0, 80)} â€” ${pn}`
-    if (act === 'PLAY') return `Playback started â€” ${pn}`
-    if (act === 'HOME') return `Home loaded â€” ${pn}`
-    if (act === 'OPEN') return `Plugin opened â€” ${pn}`
-    if (act === 'SEARCH') return `Search â€” ${pn}`
-    if (act === 'DETAIL') return `Detail page â€” ${pn}`
-    if (act === 'SELECTORS') return `Selector config loaded â€” ${pn}`
-    if (act === 'SESSION') return `Session issued â€” ${pn}`
-    return `${act} â€” ${pn}`
+    const cleanData = data ? this.cleanUrlToTitle(data) : ''
+
+    if (act === 'PLAY' && cleanData) return `Playing: ${cleanData} — ${pn}`
+    if (act === 'PLAY') return `Playback started — ${pn}`
+    if (act === 'HOME') return `Loaded homepage — ${pn}`
+    if (act === 'OPEN') return `Opened plugin — ${pn}`
+    if (act === 'SEARCH' && cleanData) return `Searched for "${cleanData}" — ${pn}`
+    if (act === 'SEARCH') return `Search list opened — ${pn}`
+    if (act === 'LOAD' && cleanData) return `Loading content: ${cleanData} — ${pn}`
+    if (act === 'LOAD') return `Loaded content page — ${pn}`
+    if (act === 'SELECTORS') return `Selector config loaded — ${pn}`
+    if (act === 'SESSION') return `Session issued — ${pn}`
+    return `${act} — ${pn}`
   }
 
   // Upgrade all auto_ placeholder devices for this IP to real device â€” matches web01.1 upgradeAutoDevicesForIP
@@ -1051,6 +1120,34 @@ export class PublicApiService {
         updatedAt: new Date(),
       },
     })
+  }
+
+  async trackDownload(key: string, pluginSlug: string, ip: string): Promise<void> {
+    const license = await this.prisma.license.findFirst({
+      where: { key, deletedAt: null },
+    })
+    if (!license) return
+
+    const plugin = await this.resolvePluginRecord(pluginSlug)
+    const canonicalSlug = plugin?.slug || pluginSlug
+    const canonicalName = plugin?.name || pluginSlug
+
+    await this.logActivity({
+      type: 'VERIFY_OK',
+      severity: 'LOW',
+      licenseId: license.id,
+      licenseKey: key,
+      ip,
+      message: `Downloaded plugin: ${canonicalName}`,
+      metadata: { plugin: canonicalSlug, action: 'DOWNLOAD' },
+    })
+
+    if (plugin) {
+      await this.prisma.plugin.update({
+        where: { id: plugin.id },
+        data: { downloadCount: { increment: 1 } },
+      }).catch(() => {})
+    }
   }
 
   async listAllPlugins() {

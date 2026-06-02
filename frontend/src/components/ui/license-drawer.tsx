@@ -232,12 +232,22 @@ function ActivityTab({ lic }: { lic: DrawerLicense }) {
 function PlaybackTab({ lic }: { lic: DrawerLicense }) {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     setLoading(true)
-    apiGet<any[]>(`/activity?licenseKey=${encodeURIComponent(lic.key)}&type=PLAYBACK_START&limit=50`)
-      .then(data => setLogs(Array.isArray(data) ? data : []))
-      .catch(() => setLogs([]))
+    setError(false)
+    apiGet<{ items: any[]; total: number }>(`/playback?licenseKey=${encodeURIComponent(lic.key)}&limit=50`)
+      .then(data => {
+        const items = data?.items ?? (Array.isArray(data) ? data : [])
+        setLogs(items)
+      })
+      .catch(() => {
+        // Fallback: query activityLog dengan type PLAYBACK_START
+        apiGet<any[]>(`/activity?licenseKey=${encodeURIComponent(lic.key)}&type=PLAYBACK_START&limit=50`)
+          .then(data => setLogs(Array.isArray(data) ? data : []))
+          .catch(() => { setLogs([]); setError(true) })
+      })
       .finally(() => setLoading(false))
   }, [lic.key])
 
@@ -250,19 +260,37 @@ function PlaybackTab({ lic }: { lic: DrawerLicense }) {
 
   return (
     <div className="space-y-2">
-      <div className="text-xs text-slate-500 mb-3">{logs.length} playback</div>
-      {logs.map((l, i) => (
-        <div key={l.id ?? i} className="p-3 rounded-xl" style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-semibold text-indigo-400">{(l.metadata as any)?.plugin || 'Plugin'}</span>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-slate-500">{logs.length} riwayat tontonan</span>
+        {error && <span className="text-xs text-red-400">Gagal memuat data</span>}
+      </div>
+      {logs.map((l, i) => {
+        // Support both PlaybackLog format and ActivityLog fallback format
+        const plugin = l.pluginSlug ?? l.pluginName ?? (l.metadata as any)?.plugin ?? 'Unknown Plugin'
+        const title  = l.videoTitle ?? l.contentTitle ?? l.message ?? '—'
+        const ipAddr = l.ip
+        const time   = l.playedAt ?? l.createdAt
+
+        return (
+          <div key={l.id ?? i} className="p-3 rounded-xl" style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <Play className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+              <span className="text-xs font-semibold text-indigo-400 truncate">{plugin}</span>
+            </div>
+            <div className="text-sm font-medium text-slate-200 mb-1.5 leading-snug">{title}</div>
+            <div className="flex items-center gap-3 text-xs text-slate-500">
+              {ipAddr && <span className="font-mono">{ipAddr}</span>}
+              {l.country && <span className="text-slate-600">{l.country}</span>}
+              {l.durationSeconds != null && (
+                <span className="text-slate-600">
+                  {Math.floor(l.durationSeconds / 60)}m {l.durationSeconds % 60}s
+                </span>
+              )}
+              <span className="ml-auto">{formatRelativeTime(time)}</span>
+            </div>
           </div>
-          <div className="text-sm font-medium text-slate-200 mb-1.5">{l.message}</div>
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            {l.ip && <span className="font-mono">{l.ip}</span>}
-            <span className="ml-auto">{formatRelativeTime(l.createdAt)}</span>
-          </div>
-        </div>
-      ))}
+        )
+      })}
       {logs.length === 0 && (
         <div className="py-12 text-center">
           <Play className="w-8 h-8 mx-auto text-slate-700 mb-2" />
