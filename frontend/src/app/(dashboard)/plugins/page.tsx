@@ -24,7 +24,7 @@ type Plugin = {
 type SyncResult = { imported: number; skipped: number; deleted?: number; errors: string[]; total: number; items?: Plugin[] }
 
 // ── Constants ────────────────────────────────────────────────
-const DEFAULT_URL = 'https://raw.githubusercontent.com/Makairamei/REPO/master/builds/plugins.json'
+const DEFAULT_URL = 'https://raw.githubusercontent.com/Makairamei/CSNEW/builds/plugins.json'
 const ADULT_TYPES = ['AnimH', 'AnimeH', 'NSFW', 'Adult', 'XXX', 'Hentai', '18+']
 const CS_STATUS: Record<number, { label: string; color: string }> = {
   1: { label: 'Working', color: '#10b981' },
