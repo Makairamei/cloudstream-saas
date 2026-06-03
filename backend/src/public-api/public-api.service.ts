@@ -498,6 +498,20 @@ export class PublicApiService {
     const canonicalPluginSlug = resolvedPlugin?.slug || pluginName || 'unknown'
     const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
 
+    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests
+    if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
+      const redisKey = `play_lock:${key}`
+      const isLocked = await this.redis.get(redisKey).catch(() => null)
+      if (isLocked) {
+        return {
+          ok: true,
+          daysLeft: this.calcDaysLeft(license.expiresAt),
+          expiresAt: license.expiresAt?.toISOString() ?? null,
+        }
+      }
+      await this.redis.setex(redisKey, 10, '1').catch(() => {})
+    }
+
     if (pluginName && action) {
       if (resolvedPlugin) {
         await this.prisma.pluginUsageLog.create({
