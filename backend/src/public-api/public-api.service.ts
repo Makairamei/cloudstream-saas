@@ -499,9 +499,9 @@ export class PublicApiService {
     const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
 
     // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests,
-    // and skip logging altogether if the URL represents a media stream or extractor embed.
+    // and skip logging altogether unless the URL represents a clean episode/page URL.
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
-      if (this.isMediaOrExtractorUrl(params.data)) {
+      if (!this.isCleanEpisodeUrl(params.data)) {
         return {
           ok: true,
           daysLeft: this.calcDaysLeft(license.expiresAt),
@@ -942,27 +942,27 @@ export class PublicApiService {
   // Helpers
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  private isMediaOrExtractorUrl(urlStr: string): boolean {
+  private isCleanEpisodeUrl(urlStr: string): boolean {
     if (!urlStr) return false
+    if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) return false
+    
     const lower = urlStr.toLowerCase()
+    
+    // Discard standard media extensions
     if (/\.(m3u8|mp4|mkv|avi|flv|webm|mov|ts|mp3|aac|m4a)(?:$|[?#&])/i.test(lower)) {
+      return false
+    }
+    
+    // Check if it's an embed/extractor or popup player URL
+    if (lower.includes('popup') || lower.includes('pass_md5') || lower.includes('/embed/') || lower.includes('player')) {
+      return false
+    }
+    
+    // Detail pages usually contain these path segments
+    if (lower.includes('/nonton-') || lower.includes('/anime/') || lower.includes('/episode/') || lower.includes('/movie/')) {
       return true
     }
-    const extractorDomains = [
-      'filelions', 'vidhide', 'smoothpre', 'dhtpre', 'peytonepre', 
-      'streamwish', 'krakenfiles', 'gofile', 'pixeldrain', 'mediafire',
-      'yourupload', 'mixdrop', 'mp4upload', 'embed', 'player', 'vidguard',
-      'lulu', 'streamhihi', 'javsw', 'earnvid', 'hanerix', 'hglink',
-      'turboplayer', 'stb.strp2p', 'upn.one', 'turtleviplay', 'turboviplay',
-      'reelshort', 'streamruby', 'ok.ru', 'rumble', 'dood', 'ds2play',
-      'd000d', 'vids', 'aghanim', 'uservideo'
-    ]
-    if (extractorDomains.some(domain => lower.includes(domain))) {
-      return true
-    }
-    if (lower.includes('pass_md5') || lower.includes('/embed/') || lower.includes('manifest') || lower.includes('/video/')) {
-      return true
-    }
+    
     return false
   }
 
