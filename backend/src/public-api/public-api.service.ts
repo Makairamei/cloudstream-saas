@@ -498,30 +498,28 @@ export class PublicApiService {
     const canonicalPluginSlug = resolvedPlugin?.slug || pluginName || 'unknown'
     const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
 
+    // Cache clean title on LOAD action
+    if (action.toUpperCase() === 'LOAD' && params.data) {
+      const cleanTitle = this.cleanUrlToTitle(params.data)
+      if (cleanTitle) {
+        await this.redis.setex(`last_load_title:${key}`, 600, cleanTitle).catch(() => {})
+      }
+    }
+
     let resolvedData = params.data
 
-    // If it's a PLAY/DOWNLOAD action and the title is a raw hash or file name, try to retrieve the clean title from the last LOAD action
+    // If it's a PLAY/DOWNLOAD action and the title is a raw hash or file name, try to retrieve the cached clean title from Redis
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
       const isRawUrl = !params.data || !params.data.startsWith('http') || /\.(m3u8|mp4|mkv|avi|flv|webm|mov|ts)(?:$|[?#&])/i.test(params.data) || params.data.length < 30
       if (isRawUrl) {
-        const lastLoadLog = await this.prisma.activityLog.findFirst({
-          where: {
-            licenseKey: key,
-            message: { startsWith: 'Loading content: ' },
-            createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) }, // last 5 minutes
-          },
-          orderBy: { createdAt: 'desc' },
-        })
-        if (lastLoadLog) {
-          const cleanTitle = lastLoadLog.message.substring('Loading content: '.length).split(' — ')[0]
-          if (cleanTitle) {
-            resolvedData = cleanTitle
-          }
+        const cachedTitle = await this.redis.get(`last_load_title:${key}`).catch(() => null)
+        if (cachedTitle) {
+          resolvedData = cachedTitle
         }
       }
     }
 
-    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests
+    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests & player heartbeats
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
       const redisKey = `play_lock:${key}`
       const isLocked = await this.redis.get(redisKey).catch(() => null)
@@ -532,7 +530,7 @@ export class PublicApiService {
           expiresAt: license.expiresAt?.toISOString() ?? null,
         }
       }
-      await this.redis.setex(redisKey, 10, '1').catch(() => {})
+      await this.redis.setex(redisKey, 120, '1').catch(() => {})
     }
 
     if (pluginName && action) {
