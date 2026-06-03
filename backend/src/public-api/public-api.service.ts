@@ -498,8 +498,16 @@ export class PublicApiService {
     const canonicalPluginSlug = resolvedPlugin?.slug || pluginName || 'unknown'
     const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
 
-    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests
+    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests,
+    // and skip logging altogether if the URL represents a media stream or extractor embed.
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
+      if (this.isMediaOrExtractorUrl(params.data)) {
+        return {
+          ok: true,
+          daysLeft: this.calcDaysLeft(license.expiresAt),
+          expiresAt: license.expiresAt?.toISOString() ?? null,
+        }
+      }
       const redisKey = `play_lock:${key}`
       const isLocked = await this.redis.get(redisKey).catch(() => null)
       if (isLocked) {
@@ -933,6 +941,30 @@ export class PublicApiService {
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Helpers
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  private isMediaOrExtractorUrl(urlStr: string): boolean {
+    if (!urlStr) return false
+    const lower = urlStr.toLowerCase()
+    if (/\.(m3u8|mp4|mkv|avi|flv|webm|mov|ts|mp3|aac|m4a)(?:$|[?#&])/i.test(lower)) {
+      return true
+    }
+    const extractorDomains = [
+      'filelions', 'vidhide', 'smoothpre', 'dhtpre', 'peytonepre', 
+      'streamwish', 'krakenfiles', 'gofile', 'pixeldrain', 'mediafire',
+      'yourupload', 'mixdrop', 'mp4upload', 'embed', 'player', 'vidguard',
+      'lulu', 'streamhihi', 'javsw', 'earnvid', 'hanerix', 'hglink',
+      'turboplayer', 'stb.strp2p', 'upn.one', 'turtleviplay', 'turboviplay',
+      'reelshort', 'streamruby', 'ok.ru', 'rumble', 'dood', 'ds2play',
+      'd000d', 'vids', 'aghanim', 'uservideo'
+    ]
+    if (extractorDomains.some(domain => lower.includes(domain))) {
+      return true
+    }
+    if (lower.includes('pass_md5') || lower.includes('/embed/') || lower.includes('manifest') || lower.includes('/video/')) {
+      return true
+    }
+    return false
+  }
 
   private normalizeName(s: string): string {
     return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
