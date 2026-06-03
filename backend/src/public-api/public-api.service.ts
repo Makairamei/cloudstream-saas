@@ -498,16 +498,31 @@ export class PublicApiService {
     const canonicalPluginSlug = resolvedPlugin?.slug || pluginName || 'unknown'
     const canonicalPluginName = resolvedPlugin?.name || pluginName || 'unknown'
 
-    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests,
-    // and skip logging altogether unless the URL represents a clean episode/page URL.
+    let resolvedData = params.data
+
+    // If it's a PLAY/DOWNLOAD action and the title is a raw hash or file name, try to retrieve the clean title from the last LOAD action
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
-      if (!this.isCleanEpisodeUrl(params.data)) {
-        return {
-          ok: true,
-          daysLeft: this.calcDaysLeft(license.expiresAt),
-          expiresAt: license.expiresAt?.toISOString() ?? null,
+      const isRawUrl = !params.data || !params.data.startsWith('http') || /\.(m3u8|mp4|mkv|avi|flv|webm|mov|ts)(?:$|[?#&])/i.test(params.data) || params.data.length < 30
+      if (isRawUrl) {
+        const lastLoadLog = await this.prisma.activityLog.findFirst({
+          where: {
+            licenseKey: key,
+            message: { startsWith: 'Loading content: ' },
+            createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) }, // last 5 minutes
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (lastLoadLog) {
+          const cleanTitle = lastLoadLog.message.substring('Loading content: '.length).split(' — ')[0]
+          if (cleanTitle) {
+            resolvedData = cleanTitle
+          }
         }
       }
+    }
+
+    // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests
+    if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
       const redisKey = `play_lock:${key}`
       const isLocked = await this.redis.get(redisKey).catch(() => null)
       if (isLocked) {
@@ -536,11 +551,11 @@ export class PublicApiService {
       }
     }
 
-    // Log action â€” always, even on first registration (web01.1 logs access + plugin usage separately)
+    // Log action — always, even on first registration (web01.1 logs access + plugin usage separately)
     await this.logActivity({
       type: this.actionToActivityType(action), severity: 'LOW',
       licenseId: license.id, deviceId: deviceRecord?.id, licenseKey: key, ip,
-      message: this.buildSuccessMessage(action, canonicalPluginName, params.data),
+      message: this.buildSuccessMessage(action, canonicalPluginName, resolvedData),
       metadata: { plugin: canonicalPluginSlug, action },
     })
 
@@ -552,7 +567,7 @@ export class PublicApiService {
           deviceId: deviceRecord?.id ?? null,
           licenseKey: key,
           pluginSlug: canonicalPluginSlug,
-          videoTitle: params.data ? this.cleanUrlToTitle(params.data).substring(0, 255) : null,
+          videoTitle: resolvedData ? this.cleanUrlToTitle(resolvedData).substring(0, 255) : null,
           videoUrl: params.data ? params.data.substring(0, 500) : null,
           ip,
         },
