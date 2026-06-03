@@ -557,24 +557,32 @@ export class PublicApiService {
       metadata: { plugin: canonicalPluginSlug, action },
     })
 
-    // Record to PlaybackLog whenever user plays or downloads content
-    if (['PLAY', 'DOWNLOAD'].includes(action?.toUpperCase())) {
-      setImmediate(() => this.prisma.playbackLog.create({
-        data: {
-          licenseId: license.id,
-          deviceId: deviceRecord?.id ?? null,
-          licenseKey: key,
-          pluginSlug: canonicalPluginSlug,
-          videoTitle: resolvedData ? this.cleanUrlToTitle(resolvedData).substring(0, 255) : null,
-          videoUrl: params.data ? params.data.substring(0, 500) : null,
-          ip,
-        },
-      }).then(() =>
-        this.prisma.license.update({
-          where: { id: license.id },
-          data: { playbackCount: { increment: 1 } },
-        }).catch(() => {})
-      ).catch(() => {}))
+    // Record to PlaybackLog whenever user plays, downloads, or loads content
+    if (['PLAY', 'DOWNLOAD', 'LOAD'].includes(action?.toUpperCase())) {
+      const cleanTitle = resolvedData ? this.cleanUrlToTitle(resolvedData).substring(0, 255) : null
+      if (cleanTitle) {
+        const lastPlaybackKey = `last_playback_title:${key}`
+        const lastTitle = await this.redis.get(lastPlaybackKey).catch(() => null)
+        if (lastTitle !== cleanTitle) {
+          await this.redis.setex(lastPlaybackKey, 600, cleanTitle).catch(() => {})
+          setImmediate(() => this.prisma.playbackLog.create({
+            data: {
+              licenseId: license.id,
+              deviceId: deviceRecord?.id ?? null,
+              licenseKey: key,
+              pluginSlug: canonicalPluginSlug,
+              videoTitle: cleanTitle,
+              videoUrl: params.data ? params.data.substring(0, 500) : null,
+              ip,
+            },
+          }).then(() =>
+            this.prisma.license.update({
+              where: { id: license.id },
+              data: { playbackCount: { increment: 1 } },
+            }).catch(() => {})
+          ).catch(() => {}))
+        }
+      }
     }
 
 
