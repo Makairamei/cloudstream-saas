@@ -565,8 +565,8 @@ export class PublicApiService {
       metadata: { plugin: canonicalPluginSlug, action },
     })
 
-    // Record to PlaybackLog whenever user plays or downloads content
-    if (['PLAY', 'DOWNLOAD'].includes(action?.toUpperCase())) {
+    // Record to PlaybackLog whenever user plays, downloads or loads content
+    if (['PLAY', 'DOWNLOAD', 'LOAD'].includes(action?.toUpperCase())) {
       if (cleanTitle) {
         const lastPlaybackKey = `last_playback_title:${key}`
         const lastTitle = await this.redis.get(lastPlaybackKey).catch(() => null)
