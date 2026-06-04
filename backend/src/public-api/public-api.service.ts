@@ -449,20 +449,26 @@ export class PublicApiService {
       }
       if (!deviceRecord) {
         // Register new device
-        deviceRecord = await this.prisma.device.create({
-          data: {
-            licenseId: license.id,
-            fingerprint,
-            hash,
-            name: deviceModel,
-            model: deviceModel,
-            status: 'ONLINE',
-            lastIp: ip,
-            lastSeenAt: new Date(),
-            appVersion: this.extractAppVersion(params.ua),
-          },
-        })
-        isNewDevice = true
+        try {
+          deviceRecord = await this.prisma.device.create({
+            data: {
+              licenseId: license.id,
+              fingerprint,
+              hash,
+              name: deviceModel,
+              model: deviceModel,
+              status: 'ONLINE',
+              lastIp: ip,
+              lastSeenAt: new Date(),
+              appVersion: this.extractAppVersion(params.ua),
+            },
+          })
+          isNewDevice = true
+        } catch (err) {
+          deviceRecord = await this.prisma.device.findUnique({ where: { hash } })
+          if (!deviceRecord) throw err
+          isNewDevice = false
+        }
       }
 
       await this.logActivity({
@@ -519,9 +525,11 @@ export class PublicApiService {
       }
     }
 
+    const cleanTitle = resolvedData ? this.cleanUrlToTitle(resolvedData).substring(0, 255) : null
+
     // Deduplicate PLAY/DOWNLOAD actions using Redis to handle concurrent/duplicate requests & player heartbeats
     if (['PLAY', 'DOWNLOAD'].includes(action.toUpperCase())) {
-      const redisKey = `play_lock:${key}`
+      const redisKey = `play_lock:${key}:${canonicalPluginSlug}:${cleanTitle || 'unknown'}`
       const isLocked = await this.redis.get(redisKey).catch(() => null)
       if (isLocked) {
         return {
@@ -557,9 +565,8 @@ export class PublicApiService {
       metadata: { plugin: canonicalPluginSlug, action },
     })
 
-    // Record to PlaybackLog whenever user plays, downloads, or loads content
-    if (['PLAY', 'DOWNLOAD', 'LOAD'].includes(action?.toUpperCase())) {
-      const cleanTitle = resolvedData ? this.cleanUrlToTitle(resolvedData).substring(0, 255) : null
+    // Record to PlaybackLog whenever user plays or downloads content
+    if (['PLAY', 'DOWNLOAD'].includes(action?.toUpperCase())) {
       if (cleanTitle) {
         const lastPlaybackKey = `last_playback_title:${key}`
         const lastTitle = await this.redis.get(lastPlaybackKey).catch(() => null)
@@ -580,7 +587,9 @@ export class PublicApiService {
               where: { id: license.id },
               data: { playbackCount: { increment: 1 } },
             }).catch(() => {})
-          ).catch(() => {}))
+          ).catch((e) => {
+            this.logger.error(`Failed to create playback log: ${e.message}`, e.stack);
+          }))
         }
       }
     }
